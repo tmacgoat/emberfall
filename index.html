@@ -37,6 +37,8 @@ canvas#cv{display:block;touch-action:none;box-shadow:0 0 30px #000}
 #banner.on{opacity:1}
 #toast{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);background:rgba(40,20,10,.92);border:1px solid #c98b3a;border-radius:16px;padding:5px 14px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s;white-space:nowrap}
 #toast.on{opacity:1}
+#toast.appr,#toast.dis{position:fixed;top:max(64px,9vh);bottom:auto;z-index:70;font-size:16px;font-variant:small-caps;letter-spacing:1px;padding:7px 18px;box-shadow:0 4px 18px rgba(0,0,0,.6)}
+#toast.appr{border-color:#8bc34a;color:#d6f5b0}#toast.dis{border-color:#e57373;color:#ffc9c9}
 #hud{flex:none;height:128px;background:linear-gradient(#18110b,#0d0a08);border-top:1px solid #4a3622;padding:6px 8px;display:flex;flex-direction:column;gap:6px;overflow:hidden}
 #who{display:flex;align-items:center;gap:8px;font-size:14px;min-height:40px}
 #who img{width:40px;height:40px;flex:none}
@@ -354,7 +356,7 @@ function initAudio() {
     if (AC.state === 'suspended') AC.resume();
   } catch (e) {}
 }
-function setMuted(m) { muted = m; localStorage.setItem('emberfall-muted', m ? '1' : '0'); if (master) master.gain.value = m ? 0 : 0.6; $('#sndBtn').textContent = m ? '🔇' : '♪'; }
+function setMuted(m) { muted = m; if (m && typeof VO !== 'undefined') VO.stop(); localStorage.setItem('emberfall-muted', m ? '1' : '0'); if (master) master.gain.value = m ? 0 : 0.6; $('#sndBtn').textContent = m ? '🔇' : '♪'; }
 function tone(f, d, type = 'sine', v = 0.15, f2 = null, delay = 0) {
   if (!AC || muted) return; const t = AC.currentTime + delay;
   const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, t);
@@ -813,6 +815,9 @@ async function attackRoll(att, def, o) {
   await showDice({ title: `${att.name} → ${def.name} · ${o.name}${adv ? ' (advantage)' : ''}`, d20, keep, mod, vs: def.ac, vsLabel: 'AC',
     verdict: crit ? 'Critical Hit!' : fumble ? 'Critical Miss' : hit ? 'Hit' : 'Miss', vcls: crit ? 'crit' : hit ? 'hit' : 'miss', lines, sfx: crit ? 'crit' : hit ? 'hit' : 'miss', hold: att.team === 'foe' ? 800 : 1050 });
   log(`${att.name} ${o.name} → ${def.name}: ${nat}${sgn(mod)}=${nat + mod} vs AC ${def.ac} — ${crit ? 'CRIT! ' : ''}${hit ? total + ' dmg' : fumble ? 'fumble' : 'miss'}`);
+  C.lastAtt = att;
+  if (att.team === 'hero') { if (crit) VO.bark(Math.random() < 0.4 ? 'narr.herocrit' : att.id + '.crit', { prio: 2, cd: 0 }); else if (fumble) VO.bark(Math.random() < 0.5 ? 'narr.hero1' : att.id + '.fumble', { prio: 2, cd: 0 }); else if (!hit) VO.bark(att.id + '.miss', { chance: 0.4, cd: 9000 }); }
+  else { if (crit) VO.bark(att.id + '.crit', { prio: 2, cd: 0 }); else if (!hit) VO.bark(att.id + '.miss', { chance: fumble ? 0.8 : 0.3, cd: 8000 }); }
   if (hit) { if (crit) C.shake = performance.now(); await damage(def, total, crit); } else floatText(def, fumble ? 'FUMBLE' : 'MISS', '#cfd8dc');
   return hit ? total : 0;
 }
@@ -821,11 +826,24 @@ async function damage(u, n, crit) {
   spawn(u.x, u.y, crit ? 26 : 12, crit ? '#ffd54f' : '#ff7043', { speed: crit ? 3.2 : 2.2, up: 1 });
   if (u.team === 'hero') { rumble(0.6, 0.3, 160); if (n >= 8) flash(true); } else rumble(crit ? 1 : 0.3, crit ? 0.8 : 0.2, crit ? 280 : 90);
   if (!crit && n >= 10) C.shake = performance.now();
+  voHurt(u);
   if (u.hp <= 0) { u.deathT = performance.now(); u.hidden = false; spawn(u.x, u.y, 22, u.team === 'hero' ? '#90a4ae' : '#bdbdbd', { speed: 1.6, up: 1.5, g: 1, life: 0.9, sz: 0.09 }); if (u.team === 'hero') { log(`<b>${u.name} is down!</b> Heal them to revive.`); sfx('fail'); } else { log(`${u.name} falls.`); G.stats.kills++; } }
   updateUI(); await wait(260);
 }
-function heal(u, n) { const was = u.hp; u.hp = Math.min(u.maxhp, u.hp + n); floatText(u, '+' + (u.hp - was), '#7CFC7C'); C.fx.push({ type: 'ring', x: u.x, y: u.y, t0: performance.now(), dur: 600, col: '#7CFC7C' }); spawn(u.x, u.y, 16, '#a5ff9e', { speed: 0.8, up: 2, g: -1, life: 0.9 }); if (was <= 0) log(`${u.name} is back on their feet!`); sfx('heal'); updateUI(); }
+function voHurt(u) {
+  const att = C && C.lastAtt;
+  if (u.hp <= 0) {
+    if (u.team === 'foe') { if (u.T.boss) VO.bark('king.death', { prio: 4, cd: 0 }); else if (!(Math.random() < 0.55 && VO.bark(u.id + '.death', { prio: 2, cd: 4000 })) && att && att.team === 'hero') VO.bark(att.id + '.kill', { prio: 2, cd: 5000 }); }
+    else { const pal = C.units.filter(h => h.team === 'hero' && h.hp > 0 && h !== u); if (!(att && att.team === 'foe' && Math.random() < 0.5 && VO.bark(att.id + '.kill', { prio: 2, cd: 0 })) && pal.length) VO.bark(pal[Math.floor(Math.random() * pal.length)].id + '.allydown', { prio: 2, cd: 0 }); }
+    return;
+  }
+  if (u.T && u.T.boss) { if (!u.lowSaid && u.hp < u.maxhp * 0.25) { u.lowSaid = true; VO.bark('king.low', { prio: 3, cd: 0 }); } else VO.bark('king.hurt', { chance: 0.35, cd: 9000 }); return; }
+  if (u.team === 'hero' && !u.lowSaid && u.hp < u.maxhp * 0.3) { u.lowSaid = true; VO.bark(u.id + '.low', { prio: 2, cd: 0 }); return; }
+  VO.bark(u.id + '.hurt', { chance: u.team === 'hero' ? 0.4 : 0.3, cd: 8000 });
+}
+function heal(u, n) { if (u.hp + n >= u.maxhp * 0.5) u.lowSaid = false; const was = u.hp; u.hp = Math.min(u.maxhp, u.hp + n); floatText(u, '+' + (u.hp - was), '#7CFC7C'); C.fx.push({ type: 'ring', x: u.x, y: u.y, t0: performance.now(), dur: 600, col: '#7CFC7C' }); spawn(u.x, u.y, 16, '#a5ff9e', { speed: 0.8, up: 2, g: -1, life: 0.9 }); if (was <= 0) log(`${u.name} is back on their feet!`); sfx('heal'); updateUI(); }
 async function healRoll(src, t, name, expr) {
+  VO.bark(src.id + '.heal', { chance: 0.55, cd: 6000 });
   const r = rollExpr(expr); await showDice({ title: `${src.name} · ${name}${t !== src ? ' → ' + t.name : ''}`, lines: [fmtRoll(r)], verdict: `+${r.total} HP`, vcls: 'hit', hold: 800 });
   heal(t, r.total); log(`${src.name} ${name} → ${t.name}: +${r.total} HP`); return r.total;
 }
@@ -918,6 +936,8 @@ function startCombat(id) {
   if (C.surprise) log('<b>Surprise!</b> Every hero has advantage on their first attack.');
   if (king && G.flags.kingWeak) log('You know his weakness: Hollow King AC lowered, radiant ×2.');
   makeBg(); banner(E.name); updateUI(); save(); setMood(id === 'fight4' ? 'boss' : 'combat');
+  const lead = { fight1: 'skarn', fight2: 'grath', fight3: G.flags.traitor ? 'ilsa' : 'acolyte', fight4: 'king' }[id];
+  setTimeout(() => { if (!C || C.id !== id) return; if (id !== 'fight4' && Math.random() < 0.4) VO.bark('narr.combatstart', { prio: 3, cd: 0 }); else VO.bark(lead + '.start', { prio: 3, cd: 0 }); }, 500 * SPEED);
   setTimeout(() => nextTurn(), 1000 * SPEED);
 }
 async function nextTurn() {
@@ -925,8 +945,17 @@ async function nextTurn() {
   let guard = 0;
   do { C.ti++; if (C.ti >= C.order.length) { C.ti = 0; C.round++; G.stats.rounds++; log(`— Round ${C.round} —`); } } while (C.order[C.ti].hp <= 0 && ++guard < 200);
   const u = C.cur = C.order[C.ti]; u.move = u.spd; u.action = true; u.bonus = true; u.sneakUsed = false; C.pending = null;
-  if (u.team === 'hero') { C.sel = firstUsable(u); C.cursor = { x: u.x, y: u.y }; C.busy = false; banner(`${u.name}'s turn`, 700); sfx('select'); updateUI(); if (window.__autoplay) setTimeout(() => autoHero(), 50); }
-  else { C.busy = true; updateUI(); try { await foeTurn(u); } catch (e) { console.error(e); } if (C && !C.over) { await wait(250); nextTurn(); } }
+  if (u.team === 'hero') { C.sel = firstUsable(u); C.cursor = { x: u.x, y: u.y }; C.busy = false; banner(`${u.name}'s turn`, 700); sfx('select'); updateUI(); voTurn(u); if (window.__autoplay) setTimeout(() => autoHero(), 50); }
+  else { C.busy = true; updateUI(); VO.bark(u.id + '.turn', { chance: u.T.boss ? 0.45 : 0.22, cd: 12000, gap: 2500 }); try { await foeTurn(u); } catch (e) { console.error(e); } if (C && !C.over) { await wait(250); nextTurn(); } }
+}
+const BANTER = [['wren', 'brannoc'], ['isolde', 'maren'], ['brannoc', 'maren'], ['maren', 'wren'], ['isolde', 'wren'], ['brannoc', 'isolde']];
+function voTurn(u) {
+  if (C.round >= 2 && !C.banter && Math.random() < 0.45) {
+    const alive = new Set(C.units.filter(h => h.team === 'hero' && h.hp > 0).map(h => h.id));
+    const opts = BANTER.map((p, i) => i).filter(i => alive.has(BANTER[i][0]) && alive.has(BANTER[i][1]) && !(G.banterSeen || []).includes(i));
+    if (opts.length) { const i = opts[Math.floor(Math.random() * opts.length)]; if (VO.play('banter.' + i + 'a', { prio: 1, next: 'banter.' + i + 'b' })) { C.banter = true; G.banterSeen = (G.banterSeen || []).concat(i); return; } }
+  }
+  VO.bark(u.id + '.turn', { chance: 0.2, cd: 15000, gap: 2500 });
 }
 function checkEnd() {
   if (!C) return true; if (C.over) return true;
@@ -960,14 +989,14 @@ async function foeTurn(u) {
 }
 async function kingTurn(u, heroes) {
   if (!u.summoned && u.hp <= u.maxhp / 2) {
-    u.summoned = true; sfx('roar'); banner('"Rise, my hollow servants!"', 1400); log('<b>The Hollow King</b> calls the dead from their graves!');
+    u.summoned = true; sfx('roar'); VO.bark('king.summon', { prio: 4, cd: 0 }); banner('"Rise, my hollow servants!"', 1400); log('<b>The Hollow King</b> calls the dead from their graves!');
     const spots = []; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const x = u.x + dx, y = u.y + dy; if (!blocked(x, y) && !occ(x, y)) spots.push({ x, y }); }
     for (const s of spots.slice(0, 2)) { const m = mkFoe('hollowed', s.x, s.y); C.units.push(m); C.order.splice(C.ti + 1, 0, m); C.fx.push({ type: 'ring', x: s.x, y: s.y, t0: performance.now(), dur: 700, col: '#b388ff' }); }
     updateUI(); await wait(900); return;
   }
   const near = heroes.filter(h => cheb(u, h) <= 2);
   if (C.round % 3 === 0 && near.length >= 2 && u.novaRound !== C.round) {
-    u.novaRound = C.round; sfx('roar'); spawn(u.x, u.y, 60, '#7c4dff', { speed: 4.5, g: 0, life: 0.9 }); flash(true); rumble(1, 1, 400); C.fx.push({ type: 'boom', x: u.x, y: u.y, r: 2.5, t0: performance.now(), dur: 800, col: 'rgba(124,77,255,.6)' }); C.shake = performance.now();
+    u.novaRound = C.round; sfx('roar'); VO.bark('king.nova', { prio: 3, cd: 0 }); spawn(u.x, u.y, 60, '#7c4dff', { speed: 4.5, g: 0, life: 0.9 }); flash(true); rumble(1, 1, 400); C.fx.push({ type: 'boom', x: u.x, y: u.y, r: 2.5, t0: performance.now(), dur: 800, col: 'rgba(124,77,255,.6)' }); C.shake = performance.now();
     const r = rollExpr('3d6'), lines = [fmtRoll(r)], res = [];
     for (const h of near) { const nat = rnd(20), sv = nat + h.save, ok = sv >= 14, d = ok ? Math.floor(r.total / 2) : r.total; res.push([h, d]); lines.push(`${h.name}: CON save ${nat}${sgn(h.save)}=${sv} vs DC 14 — ${ok ? '<span class="hit">half</span>' : '<span class="miss">full</span>'} (${d})`); }
     await showDice({ title: 'The Hollow King · Grave Nova', lines, verdict: 'Grave Nova!', vcls: 'miss', hold: 1300 });
@@ -995,22 +1024,108 @@ async function autoHero() {
   if (C && !C.over && isPlayerTurn() && C.cur === u) { await wait(100); C.busy = false; endTurn(); }
 }
 async function victory() {
-  if (!C) return; sfx('victory'); banner('Victory!', 1600); setMood('triumph'); for (const u of C.units) if (u.team === 'hero' && u.hp > 0) spawn(u.x, u.y, 14, '#ffd27a', { speed: 1.2, up: 2.5, g: -0.5, life: 1.2 }); await wait(1500);
+  if (!C) return; sfx('victory'); banner('Victory!', 1600);
+  { const hs = C.units.filter(u => u.team === 'hero' && u.hp > 0); if (C.id !== 'fight4') setTimeout(() => { if (Math.random() < 0.45 || !hs.length) VO.bark('narr.victory', { prio: 2, cd: 0 }); else VO.bark(hs[Math.floor(Math.random() * hs.length)].id + '.victory', { prio: 2, cd: 0 }); }, 900 * SPEED); } setMood('triumph'); for (const u of C.units) if (u.team === 'hero' && u.hp > 0) spawn(u.x, u.y, 14, '#ffd27a', { speed: 1.2, up: 2.5, g: -0.5, life: 1.2 }); await wait(1500);
   for (const u of C.units.filter(u => u.team === 'hero')) { const P = G.party[u.id]; P.hp = u.hp <= 0 ? 1 : Math.min(P.maxhp, u.hp + Math.ceil(P.maxhp * 0.25)); }
+  if (C.id === 'fight4') await voWait(6000);
   G.stats.fights++; const next = { fight1: 'loot1', fight2: 'loot2', fight3: 'loot3', fight4: 'ending' }[C.id];
   bgEnc = C.enc; C = null; updateUI(); goto(next);
 }
 async function defeat() {
-  sfx('defeat'); banner('Defeat', 1600); await wait(1400);
+  sfx('defeat'); banner('Defeat', 1600); setTimeout(() => VO.bark('narr.defeat', { prio: 4, cd: 0 }), 600 * SPEED); await wait(1400);
   panel(`<h2>The party has fallen…</h2><p class="txt narr">The embers on your palms flicker and dim. But the crown is not done with you yet — fate offers another roll of the dice.</p>
     <div class="row"><button class="choice" data-a="retry">Try the fight again</button><button class="choice" data-a="title">Return to title</button></div>`, true,
     { retry: () => { G = loadSave(); runStage(); }, title: () => titleScreen() });
 }
+const VO_LINES = {"narr.checkcrit.0":["narr","A natural twenty. Somewhere, a god sits up and starts paying attention.",5.54],"narr.checkcrit.1":["narr","Fate leans in, impressed. You feel... magnificent. Savor it. Fate is a fickle date.",9.07],"narr.checkcrit.2":["narr","Twenty. The dice adore you tonight. Do not ask them what they want in return.",6.41],"narr.check1.0":["narr","A natural one. The universe pauses, purely to laugh at you.",4.94],"narr.check1.1":["narr","You feel a deep and sudden kinship with the floor.",2.88],"narr.check1.2":["narr","You fail so completely that it becomes, in its own way, an art form.",4.75],"narr.checkok.0":["narr","You succeed. Try not to let it go to your head.",3.79],"narr.checkok.1":["narr","It works. You are as surprised as anyone.",3.82],"narr.checkok.2":["narr","Competence. How refreshing. How unlike you.",5.02],"narr.checkfail.0":["narr","You fail. Quietly. With dignity, if not much else.",5.76],"narr.checkfail.1":["narr","It does not work. It was never going to work. But it was adorable.",5.69],"narr.checkfail.2":["narr","Your confidence, regrettably, was the only thing that rolled high.",4.01],"narr.herocrit.0":["narr","A blow so perfect that the bards will exaggerate it anyway.",3.6],"narr.herocrit.1":["narr","You strike true. Your enemy reconsiders every decision that led to this moment.",5.71],"narr.herocrit.2":["narr","Steel finds its mark, and its mark finds religion.",3.38],"narr.hero1.0":["narr","You swing with total commitment, and hit only the concept of air.",3.86],"narr.hero1.1":["narr","A natural one. Your weapon briefly considers a different career.",4.73],"narr.hero1.2":["narr","The attack misses so badly, your enemy almost feels sorry for you. Almost.",6.0],"narr.combatstart.0":["narr","Roll for initiative. And perhaps, for courage.",4.3],"narr.combatstart.1":["narr","Steel is drawn. Prayers are hastily remembered.",4.03],"narr.combatstart.2":["narr","Violence, as ever, is the most honest form of conversation.",4.18],"narr.victory.0":["narr","The last foe falls. You feel alive. Mostly.",5.21],"narr.victory.1":["narr","Victory. The bards will get it wrong, but they will get it loud.",4.75],"narr.victory.2":["narr","The dust settles. Somewhere, a goblin mother will be writing a strongly worded letter.",5.95],"narr.defeat.0":["narr","Darkness takes you. But this is not your ending. The dice, it seems, want a rematch.",7.49],"narr.defeat.1":["narr","You fall. The crown hums, pleased with itself. It is not done with you yet.",6.65],"narr.loot.0":["narr","You loot the fallen with the brisk efficiency of people who have absolutely done this before.",4.9],"narr.loot.1":["narr","Spoils, glorious spoils. Morally gray, financially green.",5.98],"narr.levelup.0":["narr","You feel stronger. Not wiser. But stronger.",5.04],"narr.levelup.1":["narr","Power surges through you. Try to use it responsibly. You won't, but try.",6.6],"narr.voon.0":["narr","Ah. You can hear me again. Splendid. I was beginning to talk to myself.",7.37],"brannoc.turn.0":["brannoc","Right. Point me at something and stand back.",3.38],"brannoc.turn.1":["brannoc","My sword and I have discussed it. We're going in.",3.6],"brannoc.turn.2":["brannoc","I've got a plan. It's mostly hitting.",3.14],"brannoc.crit.0":["brannoc","That one's going on my tombstone. Hopefully not soon.",4.06],"brannoc.crit.1":["brannoc","Did everyone see that? Somebody tell my mother!",3.62],"brannoc.crit.2":["brannoc","Textbook! I've never read a textbook, but textbook!",4.15],"brannoc.fumble.0":["brannoc","The sword slipped. The sword is fired.",3.07],"brannoc.fumble.1":["brannoc","I meant to do that. To the ground. Specifically.",4.8],"brannoc.miss.0":["brannoc","He moved! That's cheating!",2.5],"brannoc.miss.1":["brannoc","Warm-up swing. That was a warm-up swing.",3.46],"brannoc.hurt.0":["brannoc","Ow! That's my good side!",2.45],"brannoc.hurt.1":["brannoc","Fine. I've got more blood. Somewhere.",4.2],"brannoc.hurt.2":["brannoc","Hit me again, I dare you. Actually, don't.",3.77],"brannoc.low.0":["brannoc","Maren? Hypothetically, how dead is 'very'?",3.55],"brannoc.low.1":["brannoc","I'm seeing a bright light. Unless that's Isolde again.",3.82],"brannoc.kill.0":["brannoc","Stay down. I'm being polite about it.",3.26],"brannoc.kill.1":["brannoc","And that, kids, is why you stretch first.",2.5],"brannoc.kill.2":["brannoc","Next!",0.67],"brannoc.allydown.0":["brannoc","Man down! Somebody do the glowy hand thing!",3.58],"brannoc.allydown.1":["brannoc","No, no, no! Get up! You still owe me money!",5.09],"brannoc.victory.0":["brannoc","Good fight! Who's carrying my snacks?",3.17],"brannoc.victory.1":["brannoc","Not bad! Same time tomorrow?",2.88],"brannoc.checkok.0":["brannoc","Ha! Brains AND muscles. Somebody write that down.",4.82],"brannoc.checkfail.0":["brannoc","In my defense, I wasn't listening.",2.23],"brannoc.approve.0":["brannoc","Now THAT is how a hero decides!",1.92],"brannoc.approve.1":["brannoc","Good call. I'd have done the same thing, just louder.",3.91],"brannoc.disapprove.0":["brannoc","Hm. Not how I'd do it. I'd do it with more yelling.",5.26],"brannoc.disapprove.1":["brannoc","I'm not mad. I'm disappointed. And a bit mad.",4.8],"wren.turn.0":["wren","Alright. Who are we stabbing, and what's it worth?",3.91],"wren.turn.1":["wren","Relax. I've done this before. Mostly to locks.",5.02],"wren.turn.2":["wren","Into the shadows. Don't wait up.",3.07],"wren.crit.0":["wren","Right in the confidence.",1.51],"wren.crit.1":["wren","Got him where his self-esteem used to be.",2.35],"wren.crit.2":["wren","Ooh, that was pretty. Somebody paint that.",3.6],"wren.fumble.0":["wren","Nobody saw that. Nobody. Saw. That.",5.62],"wren.fumble.1":["wren","The arrow had other plans. Mainly the floor.",3.74],"wren.miss.0":["wren","Warning shot. Very generous of me.",3.5],"wren.miss.1":["wren","I was aiming for the vibe.",1.61],"wren.hurt.0":["wren","Ow! Rude!",1.85],"wren.hurt.1":["wren","Oi! I bruise like a peach!",2.74],"wren.hurt.2":["wren","That's going in my diary, and you're the villain.",2.81],"wren.low.0":["wren","Not to be dramatic, but I'm dying a bit.",2.5],"wren.low.1":["wren","Maren, love, I'd like a miracle, please. Small one. Today.",6.7],"wren.kill.0":["wren","And stay dead. It's tidier.",2.78],"wren.kill.1":["wren","Pickpocketed his last breath.",1.82],"wren.kill.2":["wren","Somebody check him for coins.",1.85],"wren.allydown.0":["wren","Oh, brilliant. Now I have to be the responsible one.",4.42],"wren.victory.0":["wren","Dibs on everything shiny.",1.73],"wren.victory.1":["wren","Lovely. Now, who's paying for my therapy?",3.7],"wren.checkok.0":["wren","Quiet as a cat. A rich cat.",3.14],"wren.checkfail.0":["wren","Oh, come ON. The floor was LOUD.",3.74],"wren.approve.0":["wren","Ooh, I like that. Shady. Clever. Very me.",5.93],"wren.approve.1":["wren","See, this is why I stick around.",2.5],"wren.disapprove.0":["wren","Wow. Okay. Noted. Judging you forever.",5.57],"wren.disapprove.1":["wren","That's the worst idea I've heard, and I once robbed a bishop.",3.55],"isolde.turn.0":["isolde","Stand back. I'm about to be brilliant.",2.9],"isolde.turn.1":["isolde","Fascinating. Let's set it on fire.",2.78],"isolde.turn.2":["isolde","Kindly hold still while I make you a lesson.",2.47],"isolde.crit.0":["isolde","And THAT is why I read.",1.46],"isolde.crit.1":["isolde","Peer reviewed, and thoroughly roasted.",2.35],"isolde.crit.2":["isolde","I'd explain the arcane theory, but you're on fire.",3.1],"isolde.fumble.0":["isolde","The weave is... having a moment.",2.09],"isolde.fumble.1":["isolde","That was a test of the spell's failure conditions. Successful test.",4.51],"isolde.miss.0":["isolde","The spell's fine. You're just badly positioned.",3.22],"isolde.miss.1":["isolde","I missed on purpose. For science.",2.83],"isolde.hurt.0":["isolde","Ah! My robes! These were imported!",3.12],"isolde.hurt.1":["isolde","How dare you. I have three degrees.",2.62],"isolde.hurt.2":["isolde","Violence. How pedestrian.",2.33],"isolde.low.0":["isolde","Let the record show that I was the smart one.",2.62],"isolde.low.1":["isolde","Maren, I'm leaking, and it isn't ink.",2.62],"isolde.kill.0":["isolde","Extinguished. Well. The opposite.",3.17],"isolde.kill.1":["isolde","Class dismissed.",1.15],"isolde.kill.2":["isolde","Ashes to ashes. Mostly ashes.",2.9],"isolde.allydown.0":["isolde","Oh, wonderful. Do I have to carry them? I have noodle arms.",4.68],"isolde.victory.0":["isolde","Another triumph for education.",2.09],"isolde.victory.1":["isolde","Splendid. I'll be writing a paper on this. You'll be a footnote.",4.58],"isolde.checkok.0":["isolde","Obviously.",0.86],"isolde.checkfail.0":["isolde","That rune was smudged. That is my official position.",3.6],"isolde.approve.0":["isolde","A clever choice. You're learning.",2.33],"isolde.approve.1":["isolde","Oh, finally. A decision with a brain behind it.",3.72],"isolde.disapprove.0":["isolde","Bold. Wrong, but bold.",2.38],"isolde.disapprove.1":["isolde","I'll pretend I didn't see that. For your reputation.",3.55],"maren.turn.0":["maren","Dawnmother, give me strength. And patience. Mostly patience.",4.99],"maren.turn.1":["maren","Alright, children. Behave.",2.28],"maren.turn.2":["maren","Let's get this over with. I have vespers at six.",3.12],"maren.crit.0":["maren","Smite! With love!",1.82],"maren.crit.1":["maren","The goddess says hello. Loudly.",2.52],"maren.crit.2":["maren","That was a blessing. You're welcome.",2.38],"maren.fumble.0":["maren","My goddess is laughing at me. I can hear it.",2.93],"maren.fumble.1":["maren","Even saints have off days.",1.63],"maren.miss.0":["maren","That was mercy. I'm very merciful.",2.64],"maren.miss.1":["maren","The light works in mysterious ways. Mostly missing.",3.7],"maren.hurt.0":["maren","Oh, you'll pray for that.",1.37],"maren.hurt.1":["maren","I forgive you. My mace doesn't.",2.5],"maren.hurt.2":["maren","Ow. You're going in my prayers. By name.",3.17],"maren.low.0":["maren","If I die, Brannoc gets nothing.",2.23],"maren.low.1":["maren","Nobody ever heals the healer. Nobody.",3.02],"maren.kill.0":["maren","Go to the light. Quickly, I'm busy.",2.52],"maren.kill.1":["maren","Rest in pieces.",1.25],"maren.kill.2":["maren","May you find peace. Far away from me.",2.52],"maren.allydown.0":["maren","Don't you dare die on me! Your paperwork is a nightmare!",3.58],"maren.heal.0":["maren","Hold still, this'll sting. It won't, I just like saying it.",4.15],"maren.heal.1":["maren","There. Good as new. Mostly.",2.69],"maren.heal.2":["maren","Walk it off. It's holy now.",2.35],"maren.victory.0":["maren","Everyone alive? Good. Who's bleeding? Don't all answer at once.",4.75],"maren.victory.1":["maren","Thank you, Dawnmother. And thank you, me.",2.81],"maren.checkok.0":["maren","The goddess sees all. So do I.",2.71],"maren.checkfail.0":["maren","The goddess is screening my prayers again.",2.74],"maren.approve.0":["maren","The Dawnmother approves. So do I, surprisingly.",3.62],"maren.approve.1":["maren","Good. That was kind. Don't let it go to your head.",3.31],"maren.disapprove.0":["maren","I'll be praying for you. Not in a nice way.",2.86],"maren.disapprove.1":["maren","Wow. The goddess just sighed. I heard it.",3.67],"skarn.start.0":["skarn","Skarn's boys! Get the shinies! Don't hit the hat!",3.67],"skarn.start.1":["skarn","You scratch Skarn's hat, you die TWICE!",2.33],"skarn.turn.0":["skarn","Skarn is coming! Skarn is coming very fast with very small legs!",4.22],"skarn.turn.1":["skarn","Skarn will crush you, then wear your boots as hats!",2.71],"skarn.crit.0":["skarn","HA! Skarn is best at stabbing! Skarn has a certificate!",4.06],"skarn.miss.0":["skarn","That was a warning! Skarn always warns!",2.9],"skarn.miss.1":["skarn","You moved! Not fair! Skarn is telling!",3.31],"skarn.hurt.0":["skarn","OW! Not the face! The face is Skarn's brand!",3.5],"skarn.hurt.1":["skarn","You hit Skarn?! Skarn is telling his mum!",3.14],"skarn.death.0":["skarn","Tell my hats... I loved them.",2.04],"skarn.death.1":["skarn","Skarn is... deceased. Skarn did not plan for this.",3.79],"skarn.kill.0":["skarn","Ha! Skarn wins! Skarn is taking your hat!",3.6],"cutter.turn.0":["cutter","Stabby time! Stabby, stabby, stabby time!",3.72],"cutter.turn.1":["cutter","I'm gonna get promoted for this!",1.49],"cutter.turn.2":["cutter","Boss! Boss, watch this! BOSS!",3.5],"cutter.crit.0":["cutter","I got him! Did the boss see? Tell the boss!",3.65],"cutter.crit.1":["cutter","Hah! Stab successful!",2.28],"cutter.miss.0":["cutter","I meant to hit the air. The air had it coming.",2.64],"cutter.miss.1":["cutter","Ow! I stabbed meself a little.",2.21],"cutter.hurt.0":["cutter","Oi! I'm on my lunch break!",2.21],"cutter.hurt.1":["cutter","Not fair, you're BIG!",1.34],"cutter.death.0":["cutter","I never even got... a hat...",1.61],"cutter.death.1":["cutter","Tell the boss... I quit.",1.97],"cutter.kill.0":["cutter","I'm employee of the month! Employee of the MONTH!",2.98],"archer.turn.0":["archer","Hold still! I'm a professional!",2.62],"archer.turn.1":["archer","From up here you all look like snacks!",1.87],"archer.turn.2":["archer","Eye of the goblin! Very sniper! Much deadly!",4.37],"archer.crit.0":["archer","Bullseye! I'm literally the best one!",2.71],"archer.crit.1":["archer","Ha! Right in the knee! Classic!",3.53],"archer.miss.0":["archer","The wind! It's the wind! There's no wind? Then it's YOUR fault!",5.5],"archer.miss.1":["archer","Missed on purpose! Psychological warfare!",3.31],"archer.hurt.0":["archer","Oi! I'm ranged! You're not allowed to touch me!",4.01],"archer.hurt.1":["archer","Hey! Not the eye! I need that for my job!",4.03],"archer.death.0":["archer","Should've... stayed in archery school...",2.06],"archer.death.1":["archer","I was... gonna retire... next week...",2.62],"archer.kill.0":["archer","One shot! Well, seven shots. One counted!",4.75],"grath.start.0":["grath","That's it! No more bridge discounts! HOUNDS!",4.54],"grath.start.1":["grath","Grath is gonna charge you SO much tax for this!",2.59],"grath.turn.0":["grath","Grath smash! Then Grath invoice!",3.14],"grath.turn.1":["grath","Toll's going up! Toll goes up every second!",3.46],"grath.turn.2":["grath","Grath has a bridge degree! Respect the bridge!",3.5],"grath.crit.0":["grath","Ha! That's a late fee!",2.38],"grath.crit.1":["grath","Grath crunch! Crunchy little meat!",2.9],"grath.miss.0":["grath","Grath missed! Grath blames the bridge!",3.19],"grath.hurt.0":["grath","Ow! Grath's knee! Grath has a bad knee!",4.2],"grath.hurt.1":["grath","You hit Grath? Grath is gonna leave you a terrible review!",3.89],"grath.death.0":["grath","Grath... is... closing early today...",2.64],"grath.death.1":["grath","Tell the hounds... the bridge is theirs now...",2.5],"grath.kill.0":["grath","Toll paid! In full!",2.33],"hollowed.turn.0":["hollowed","Uuugh... Mondays... forever...",2.78],"hollowed.turn.1":["hollowed","Not brains... just... spite...",2.33],"hollowed.turn.2":["hollowed","I used to be... an accountant...",2.28],"hollowed.crit.0":["hollowed","Still got it... the dead hand...",2.3],"hollowed.crit.1":["hollowed","Rattle... rattle...",1.22],"hollowed.miss.0":["hollowed","My eyes... wait... I don't have eyes...",3.14],"hollowed.hurt.0":["hollowed","Ow... wait, I can't feel pain... OW...",3.48],"hollowed.hurt.1":["hollowed","My ribs... I need those...",2.71],"hollowed.death.0":["hollowed","Finally... a day off...",1.75],"hollowed.death.1":["hollowed","Thank you... I hated this job...",3.02],"hollowed.kill.0":["hollowed","Join us... we have dental... no we don't...",3.22],"acolyte.start.0":["acolyte","Have you heard the good news about the Hollow King?",2.11],"acolyte.start.1":["acolyte","Join the Ashen cult! Benefits include eternal damnation!",3.84],"acolyte.turn.0":["acolyte","The King sees you! And he is not impressed!",2.9],"acolyte.turn.1":["acolyte","Burn, unbelievers! Then sign up!",3.02],"acolyte.turn.2":["acolyte","Cinder lash! For the newsletter!",2.57],"acolyte.crit.0":["acolyte","Praise the Hollow King! Unsubscribe from life!",3.24],"acolyte.miss.0":["acolyte","The King tests my faith. And apparently my aim.",3.46],"acolyte.hurt.0":["acolyte","Ow! I was promised immortality! I want a refund!",4.44],"acolyte.death.0":["acolyte","The brochure... said nothing... about this...",2.47],"acolyte.death.1":["acolyte","I was... two levels... from the top...",2.23],"acolyte.heal.0":["acolyte","Rise, brother! Your contract isn't up yet!",3.34],"acolyte.kill.0":["acolyte","One more for the mailing list.",1.61],"ilsa.start.0":["ilsa","Surprise! The chains were a costume. The smile wasn't.",4.01],"ilsa.start.1":["ilsa","Oh, you lot are SO easy. Kill them!",2.33],"ilsa.turn.0":["ilsa","You freed me. That was adorable.",2.21],"ilsa.turn.1":["ilsa","Don't look so betrayed. It's very unflattering.",3.05],"ilsa.crit.0":["ilsa","Ooh, that had to sting. Like your trust issues.",2.86],"ilsa.miss.0":["ilsa","Fine. I'll just betray you again later.",2.66],"ilsa.hurt.0":["ilsa","Rude! I was acting! You're the ones who believed it!",3.6],"ilsa.death.0":["ilsa","In my defense... I'm a terrible person.",2.64],"ilsa.death.1":["ilsa","Should've... joined... a nicer cult...",2.35],"ilsa.kill.0":["ilsa","That's what you get for being nice.",1.78],"king.start.0":["king","Behold! A king who would not die, and will not shut up! KNEEL!",6.79],"king.start.1":["king","At last, an audience! I have been rehearsing for nine hundred years!",5.78],"king.turn.0":["king","Tremble, mortals! My entrance music is coming!",4.87],"king.turn.1":["king","Your bones would make a delightful throne cushion.",3.14],"king.turn.2":["king","I have outlived empires. I shall outlive this conversation.",5.33],"king.crit.0":["king","Exquisite! Bring me a quill, that must be written down!",4.97],"king.crit.1":["king","Your death will be the highlight of my century!",2.88],"king.miss.0":["king","That miss was a royal decree. I decree it was intentional.",5.04],"king.hurt.0":["king","You dare strike a king? You're going on the list. It is a very long list.",6.7],"king.hurt.1":["king","My crown! Do you know what it costs to polish bone?",4.56],"king.summon.0":["king","Rise, my hollow servants! And look busy!",4.63],"king.summon.1":["king","Servants! Rise! Overtime is mandatory!",5.74],"king.nova.0":["king","Feel the grave's embrace! It is cold, and it never calls back!",5.74],"king.low.0":["king","No! Not like this! At least let me finish my monologue!",6.29],"king.death.0":["king","Impossible! I had... a third act!",4.25],"king.death.1":["king","Curse you... and your little... dice!",2.86],"king.kill.0":["king","One less heir. One more throne cushion.",4.06],"banter.0a":["wren","Brannoc, have you ever had a plan that wasn't 'hit it'?",2.93],"banter.0b":["brannoc","Once. I hit it anyway.",2.66],"banter.1a":["isolde","Statistically, one of us dies in this fight.",2.93],"banter.1b":["maren","Then statistically, stop talking and help.",2.86],"banter.2a":["brannoc","Maren, if I fall, tell them I was handsome.",2.57],"banter.2b":["maren","I'll tell them you were brave. I don't lie in church.",3.14],"banter.3a":["maren","Wren, is that my coin purse on your belt?",2.26],"banter.3b":["wren","It's a loan. A long, very quiet loan.",3.89],"banter.4a":["isolde","Wren, do try not to stab anything I'm about to set on fire.",3.72],"banter.4b":["wren","Then set things on fire slower, your highness.",3.0],"banter.5a":["brannoc","Isolde, can you make my sword be on fire?",2.45],"banter.5b":["isolde","I can make YOU be on fire. Ask me again.",3.0],"d_1viixmn":["narr","The caravan to Thornwick is burning. Moments ago, the black iron crown you were paid to guard split open with a scream. You wake in the wreckage, a glowing ember-sigil seared into your palm, three strangers groaning beside you. You feel… employed. Briefly.",19.3],"d_2z9a1y":["brannoc","On your feet! Whatever that crown did to us can wait. We have company.",5.71],"d_2dngdt":["wren","Gloomkin raiders. Three of them, and a chief with a very ugly hat. They haven't spotted us behind the wagon yet.",8.16],"d_1ugp3ph":["skarn","OI! Crown-thieves! That shiny crown is Skarn's now. Skarn will wear it on Skarn's head, next to Skarn's OTHER hat!",7.27],"d_vof9vm":["isolde","These marks… they're warm. Like something is listening through them.",4.1],"d_1ygk4i5":["maren","Then let it listen while we live. How do we take them?",3.07],"d_1ykvhrm":["narr","You slip through the smoke like a rumor. Not one of them sees you coming. Surprise! Every hero gets advantage on their first attack.",10.61],"d_18k1sc5":["narr","A burning wheel snaps beneath Wren's boot with the volume of a cathedral bell. Every goblin turns. So much for subtle.",9.24],"d_i4jvtx":["brannoc","That's the spirit!",1.1],"d_1t9u0n6":["narr","Night falls. You make camp in a hollow off the road. The fire crackles, and the sigil on your palm pulses in time with it, like a second heartbeat that does not belong to you.",12.17],"d_18nmued":["isolde","I studied the crown's shards while you three argued over the chief's hat. It belonged to the Hollow King, a tyrant who refused to die. Our marks are pieces of his crown. He wants them back.",11.83],"d_fr1sfa":["wren","And by \"back\" you mean…",1.58],"d_ti7jnq":["isolde","Out of our hands. Possibly with the hands still attached.",3.82],"d_nmnb9y":["brannoc","The marks pull north: past Grath's Bridge, to the old chapel and the crypt beneath it. Before we sleep?",6.29],"d_l2cgr4":["narr","Beneath a scorched tarp you find two Potions of Healing, still corked. Someone up there likes you. (+2 Potions)",6.82],"d_ng0hy5":["narr","You find ash, a broken lute, and one very sad boot. You feel the boot's loneliness deeply.",7.15],"d_1fv196j":["maren","\"Dawnmother, keep these fools alive. Mostly Brannoc — he needs it most.\" (Everyone is Blessed, +2 to hit, for the next fight.)",4.9],"d_17ga3a":["wren","So. Cursed crown, undead king, mystery brands. Anyone else regret taking the escort job?",8.14],"d_gvsht7":["brannoc","The pay was good!",1.13],"d_1epu8aw":["wren","The pay was a sandwich, Brannoc.",2.3],"d_ljnf5i":["maren","It was a good sandwich.",1.32],"d_d8afy3":["narr","Long rest: You sleep like the dead, which is ironic, given where you are going. HP and all abilities restored.",8.21],"d_yr1hol":["narr","At dawn you reach the river. A troll the size of a hay cart squats on the only bridge, two shadow-hounds snapping at his heels. He has the unmistakable look of a creature who has invented a fee.",13.15],"d_75lcto":["grath","Bridge toll! Forty gold, or I grind yer bones fer bread. …No wait, that's me cousin. Forty gold or a fight.",8.98],"d_163mksl":["grath","Well? Grath is hungry and Grath is bad at waiting.",3.89],"d_crgaob":["grath","Pleasure doin' business! Mind the hounds, they bite tourists. And locals. And Grath.",7.94],"d_vx5tpp":["grath","…The Hollow King? Grath hates that guy. Here, take this, and go break his stupid crown.",7.27],"d_20ekbg":["narr","Grath takes one look at Brannoc, yelps like a kettle, and dives into the river, abandoning his hoard. You feel taller. (+25 gold)",8.14],"d_g2zyji":["grath","Hah! Nice try, little meat. HOUNDS!",4.54],"d_o8yk82":["brannoc","Steel it is!",1.01],"d_6x19sv":["narr","The chapel of the Dawnmother sits cracked open on the hill, black candles guttering in every window. A young woman is chained to the gate. She looks remarkably well rested for a hostage.",12.31],"d_17w59i3":["ilsa","Thank the light! The Ashen cult dragged my brother inside — they raise the dead in there. Please, free me, I can show you the way!",6.67],"d_if778b":["wren","Your call. Something smells off — and not just the corpses.",4.73],"d_1jnux74":["maren","Your chains aren't locked, child. And that ember brand under your sleeve is fresh.",4.82],"d_1se5cc4":["ilsa","…Fine! You want to live? The Hollow King fears the dawn. Radiant light cracks his bones. Now let me GO.",7.3],"d_onndbm":["narr","She bolts into the dark. You learned the Hollow King's weakness: his AC is lowered and radiant attacks deal double damage to him.",8.86],"d_z0casd":["narr","The chains fall away far too easily. Ilsa smiles, and sprints inside, shrieking a warning. She was one of them! You feel the specific shame of being outplayed by a stranger in costume jewelry.",14.66],"d_bg4old":["ilsa","You'll regret this! I'm writing a very angry letter!",3.29],"d_wiaa75":["narr","Beneath the chapel, a stair spirals down into the crypt. You rest one last time by a guttering fire. The sigils burn so hot now that Wren has wrapped her hand in wet cloth, and is complaining about it, eloquently.",14.9],"d_10dpmio":["brannoc","Whatever is down there, we face it together. Four marks, four blades. Well — two blades, a bow, and a very angry prayer.",8.95],"d_10f5kn1":["maren","Before we go down there, I want you all to know I've forgiven you. In advance. You'll need it.",5.76],"d_oxbrsc":["isolde","That's either deeply touching or deeply alarming.",2.76],"d_1cuid00":["wren","Both. Her love language is threats.",3.26],"d_1j1fd35":["isolde","I could try to turn the marks against him — attune them to us instead of to him. It's risky.",5.5],"d_1komw7z":["narr","The sigils flare white, then cool to silver. For the first time, the crown is listening to you. For the final fight, every hero is Blessed (+2 to hit).",10.8],"d_yvfhzz":["narr","The whispers swell into a roar… then fade. Nothing gained. Nothing lost. Probably.",8.57],"d_1svzdmm":["narr","The crypt of the Hollow King. On a throne of stacked coffins sits a crowned skeleton in rotted violet, the circlet on his skull pulsing in time with your palm. He has clearly been waiting a very long time to say something dramatic.",14.42],"d_1m1v1lb":["king","Children of my crown. You carry what is mine. Kneel, return the shards, and I will let one of you rule beside me — forever. There is no dental plan. There are no teeth.",15.26],"d_wxchz2":["king","Who among you will kneel?",1.63],"d_4x5ifm":["narr","The King recoils as if struck, and a crack splits his skull. Words, it turns out, can hurt. (The Hollow King starts the fight wounded: −15 HP.)",7.32],"d_1a4rzmg":["king","Defiance! How delicious. I shall wear your bones as a cloak, and your opinions as a hat.",8.21],"d_wjye1p":["narr","The Hollow King shatters into a storm of ash and violet light. His crown falls, splits, and goes dark forever. On your palm, the ember-sigil cools into a thin silver scar. You feel… free. And a little bit famous.",17.78],"d_1jp3jjp":["wren","So… does anyone else want to never touch a cursed crown again? Just me?",5.11],"d_1n32x4x":["isolde","The marks answered to us at the end, not to him. I'll be writing about that for the rest of my life.",5.95],"d_1kph9wr":["isolde","The marks are quiet. For the first time since the road, I can hear myself think.",5.09],"d_i5dw1u":["narr","On the road home, Grath waves you across his bridge for free, forever. He tells everyone he helped. In fairness, he did.",9.86],"d_jysns1":["narr","Grath never returns to the bridge. Thornwick names it \"Brannoc's Crossing\", which Brannoc pretends not to love.",7.61],"d_1xjooie":["narr","Grath buys a very fancy hat with your forty gold. He calls it \"the Toll Crown\". You decide that's fine.",8.23],"d_1f4zq4j":["narr","Grath's bridge stands empty. The hounds, at least, found a nice farmer who feeds them twice a day.",7.3],"d_1rhnmq9":["maren","Ilsa's warning saved us. Wherever she ran, I hope she finds better masters than the Ashen cult.",6.29],"d_1a4vhr4":["maren","I keep thinking about Ilsa. Next time someone in chains smiles at us, Wren checks the locks first.",5.81],"d_62nmh2":["brannoc","Drinks are on me. Well — on the Hollow King's treasury. Same thing now.",5.98]};
+// ---------- VO: pre-rendered voice lines (subtitles, cooldowns, no overlap, music ducking) ----------
+const VO = (() => {
+  const S = { on: true, vol: 1, unlocked: false, cur: null, curPrio: 0, curId: null, endAt: 0, lastEnd: 0, cds: {}, last: {}, log: [], sub: null, base: 'vo/', lines: {}, pools: {}, spk: {}, duck: () => {}, muted: () => false, key: 'game', ui: null, theme: {} };
+  const els = new Map();
+  let subT = 0, safety = 0;
+  function init(o) {
+    Object.assign(S, o);
+    try { const v = localStorage.getItem(S.key + '_voices'); if (v !== null) S.on = v === '1'; const vl = parseFloat(localStorage.getItem(S.key + '_voicevol')); if (vl >= 0 && vl <= 1) S.vol = vl; } catch (e) {}
+    for (const id in S.lines) { const p = id.replace(/\.\d+$/, ''); (S.pools[p] = S.pools[p] || []).push(id); }
+    const st = document.createElement('style');
+    st.textContent = `#vo-sub{position:fixed;left:50%;bottom:${S.theme.bottom || '13%'};transform:translateX(-50%);max-width:min(92vw,760px);z-index:60;pointer-events:none;text-align:center;font:${S.theme.font || '600 clamp(14px,2.1vw,20px)/1.35 Georgia,serif'};color:#fff;background:rgba(0,0,0,.66);padding:7px 14px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;text-shadow:0 1px 2px #000}
+#vo-sub.on{opacity:1}#vo-sub b{margin-right:6px}
+#vo-ui{position:fixed;left:max(10px,env(safe-area-inset-left));top:max(10px,env(safe-area-inset-top));z-index:61;display:none;gap:6px}
+#vo-ui.on{display:flex}#vo-ui button{font:700 13px/1 ${S.theme.uiFont || 'monospace'};color:${S.theme.fg || '#e8f2fc'};background:rgba(0,0,0,.6);border:1.5px solid ${S.theme.border || '#6a8eb4'};border-radius:8px;padding:9px 11px;cursor:pointer;touch-action:manipulation}`;
+    document.head.appendChild(st);
+    S.sub = document.createElement('div'); S.sub.id = 'vo-sub'; document.body.appendChild(S.sub);
+    const un = () => unlock();
+    for (const ev of ['pointerdown', 'keydown', 'touchend', 'mousedown']) addEventListener(ev, un, { capture: true, passive: true });
+    if (S.controls) mountUI();
+  }
+  function unlock() { S.unlocked = true; }
+  function audio(id) {
+    let a = els.get(id);
+    if (!a) { a = new Audio(S.base + id + '.mp3'); a.preload = 'auto'; els.set(id, a); }
+    return a;
+  }
+  function end(a) {
+    if (a && S.cur !== a) return;
+    clearTimeout(safety); const nx = a && a._next, np = S.curPrio; S.cur = null; S.curId = null; S.curPrio = 0; S.lastEnd = performance.now(); S.duck(false);
+    if (nx && a._natural) { setTimeout(() => { if (!S.cur) play(nx, { prio: np }); }, 220); }
+    clearTimeout(subT); subT = setTimeout(() => S.sub.classList.remove('on'), 350);
+  }
+  function stop() { if (S.cur) { try { S.cur.pause(); } catch (e) {} end(S.cur); } }
+  function showSub(L) {
+    const sp = S.spk[L[0]] || {}; clearTimeout(subT);
+    S.sub.innerHTML = (sp.name ? `<b style="color:${sp.color || '#ffd27a'}">${sp.name}:</b>` : '') + `<span${sp.name ? '' : ' style="font-style:italic;color:#e8dcc0"'}>${L[1]}</span>`;
+    if (S.theme.place) try { S.theme.place(S.sub); } catch (e) {}
+    S.sub.classList.add('on');
+  }
+  function play(id, o = {}) {
+    const L = S.lines[id]; if (!L) return false;
+    if (!S.on || !S.unlocked || S.muted() || document.hidden) { S.log.push({ id, st: 'skip' }); return false; }
+    const prio = o.prio == null ? 1 : o.prio;
+    if (S.cur) { if (prio <= S.curPrio) { S.log.push({ id, st: 'busy' }); return false; } stop(); }
+    const a = audio(id); a.volume = S.vol; try { a.currentTime = 0; } catch (e) {}
+    S.cur = a; S.curPrio = prio; S.curId = id; S.duck(true);
+    const rec = { id, st: 'start' }; S.log.push(rec);
+    a._next = o.next || null; a._natural = false; a.onended = () => { a._natural = true; end(a); }; a.onerror = () => { rec.st = 'error'; end(a); };
+    a.onplaying = () => { rec.st = 'playing'; };
+    const p = a.play(); if (p && p.catch) p.catch(() => { rec.st = 'blocked'; end(a); });
+    if (o.sub !== false) showSub(L); else S.sub.classList.remove('on');
+    clearTimeout(safety); safety = setTimeout(() => { if (S.cur === a) { try { a.pause(); } catch (e) {} end(a); } }, ((L[2] || 4) + 2) * 1000);
+    return true;
+  }
+  // random line from a pool, with chance, per-pool cooldown and a global breather between barks
+  function bark(pool, o = {}) {
+    const ids = S.pools[pool]; if (!ids) return false;
+    const now = performance.now();
+    if (o.chance != null && Math.random() > o.chance) return false;
+    if (now - (S.cds[pool] || -1e9) < (o.cd == null ? 7000 : o.cd)) return false;
+    if (!o.prio && (S.cur || now - S.lastEnd < (o.gap == null ? 1800 : o.gap))) return false;
+    let pick = ids[Math.floor(Math.random() * ids.length)];
+    if (ids.length > 1 && pick === S.last[pool]) pick = ids[(ids.indexOf(pick) + 1) % ids.length];
+    if (!play(pick, o)) return false;
+    S.cds[pool] = now; S.last[pool] = pick; return true;
+  }
+  function has(pool) { return !!S.pools[pool]; }
+  function save() { try { localStorage.setItem(S.key + '_voices', S.on ? '1' : '0'); localStorage.setItem(S.key + '_voicevol', String(S.vol)); } catch (e) {} }
+  function setOn(v) { S.on = v; if (!v) stop(); save(); refreshUI(); }
+  function cycleVol() { const steps = [1, 0.75, 0.5, 0.25]; const i = steps.findIndex(s => Math.abs(s - S.vol) < 0.05); S.vol = steps[(i + 1) % steps.length]; if (S.cur) S.cur.volume = S.vol; save(); refreshUI(); }
+  function label() { return 'Voices: ' + (S.on ? 'On' : 'Off'); }
+  function volLabel() { return 'Voice vol: ' + Math.round(S.vol * 100) + '%'; }
+  function mountUI() {
+    const d = document.createElement('div'); d.id = 'vo-ui';
+    d.innerHTML = '<button data-v="t"></button><button data-v="v"></button>';
+    d.addEventListener('pointerdown', e => { const b = e.target.closest('button'); if (!b) return; e.preventDefault(); e.stopPropagation(); unlock(); if (b.dataset.v === 't') setOn(!S.on); else cycleVol(); if (S.onChange) S.onChange(); }, { passive: false });
+    for (const ev of ['mousedown', 'click', 'touchstart']) d.addEventListener(ev, e => e.stopPropagation());
+    document.body.appendChild(d); S.ui = d; refreshUI();
+  }
+  function refreshUI() { if (!S.ui) return; const [a, b] = S.ui.querySelectorAll('button'); a.textContent = '🗣 ' + label(); b.textContent = '🔊 ' + volLabel(); b.style.opacity = S.on ? 1 : 0.5; }
+  function showUI(v) { if (S.ui && S.ui.classList.contains('on') !== v) S.ui.classList.toggle('on', v); }
+  return { init, play, bark, stop, has, setOn, cycleVol, label, volLabel, showUI, unlock, S, get on() { return S.on; }, get busy() { return !!S.cur; } };
+})();
 // ---------------- UI ----------------
 function log(m) { const el = $('#log'); const d = document.createElement('div'); d.innerHTML = m; el.appendChild(d); while (el.children.length > (innerHeight < 500 || innerWidth < 700 ? 2 : 5)) el.firstChild.remove(); }
 let bannerT = 0, toastT = 0;
 function banner(t, ms = 1100) { const b = $('#banner'); b.textContent = t; b.classList.add('on'); clearTimeout(bannerT); bannerT = setTimeout(() => b.classList.remove('on'), ms * Math.max(SPEED, 0.3)); }
-function toast(t) { const b = $('#toast'); b.textContent = t; b.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => b.classList.remove('on'), 1400); }
+function toast(t) { const b = $('#toast'); b.textContent = t; b.className = 'on'; clearTimeout(toastT); toastT = setTimeout(() => b.classList.remove('on'), 1400); }
 function updateUI() { updateOrder(); updateHud(); updateInfo(); }
 function updateOrder() {
   const el = $('#order');
@@ -1097,6 +1212,19 @@ function focusables() { return [...document.querySelectorAll('#panel button:not(
 function setFocus(i) { const f = focusables(); if (!f.length) return; focusI = (i + f.length) % f.length; f.forEach((b, j) => b.classList.toggle('focus', j === focusI)); if (inputMode === 'pad' || inputMode === 'key') f[focusI].scrollIntoView({ block: 'nearest' }); }
 function clickFocused() { if (finishTyping()) return; const f = focusables(); if (f[focusI]) f[focusI].click(); }
 
+// ---- voice acting ----
+function voHash(t) { t = t.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim(); let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return 'd_' + h.toString(36); }
+function voDlg(text) { if (VO.S.curPrio === 5) VO.stop(); VO.play(voHash(text), { prio: 5, sub: false }); }
+let voSkip = false;
+addEventListener('pointerdown', () => { voSkip = true; }, true); addEventListener('keydown', () => { voSkip = true; }, true);
+async function voWait(max = 7000) { if (SPEED < 0.5 || !VO.busy) return; voSkip = false; const t0 = performance.now(); while (VO.busy && !voSkip && performance.now() - t0 < max) await new Promise(r => setTimeout(r, 80)); if (voSkip && VO.S.curPrio < 5) VO.stop(); }
+async function react(...list) {
+  G.appr = G.appr || {};
+  for (const [id, v] of list) {
+    G.appr[id] = (G.appr[id] || 0) + v; toast(`${HEROES[id].name} ${v > 0 ? 'approves' : 'disapproves'}.`); $('#toast').className = 'on ' + (v > 0 ? 'appr' : 'dis');
+    if (VO.bark(`${id}.${v > 0 ? 'approve' : 'disapprove'}`, { prio: 2, cd: 0, gap: 0 })) await voWait(); else await wait(450);
+  }
+}
 function speakerHead(spk) {
   const S = SPK[spk]; if (!S) return '';
   return `<div class="spk"><img src="${portrait(S.color, S.glyph, S.team, spk)}"><div><b>${S.name}</b><small>${S.sub}</small></div></div>`;
@@ -1105,11 +1233,11 @@ function dialog(spk, text, choices) {
   return new Promise(res => {
     let lock = false; const acts = {};
     const html = speakerHead(spk) + `<div class="txt ${spk === 'narr' ? 'narr' : ''}"></div><div class="chs wait">` + choices.map((c, i) => {
-      acts['c' + i] = async () => { if (lock) return; lock = true; let ok = null; if (c.check) ok = await skillCheck(c.check); res({ i, ok }); };
+      acts['c' + i] = async () => { if (lock) return; lock = true; if (VO.S.curPrio === 5) VO.stop(); let ok = null; if (c.check) ok = await skillCheck(c.check); res({ i, ok }); };
       const ck = c.check ? `<span class="chk">[${c.check.skill} DC ${c.check.dc} · ${HEROES[c.check.hero].name} ${sgn(checkMod(c.check))}]</span> ` : '';
       return `<button class="choice" data-a="c${i}" ${c.dis ? 'disabled' : ''}>${choices.length > 1 ? `<span class="n">${i + 1}.</span>` : ''}${ck}${c.t}</button>`;
     }).join('') + '</div>';
-    panel(html, false, acts); showBig(spk); typeText($('#panel .txt'), text);
+    panel(html, false, acts); showBig(spk); typeText($('#panel .txt'), text); voDlg(text);
   });
 }
 const say = (spk, text, btn = 'Continue ▸') => dialog(spk, text, [{ t: btn }]);
@@ -1118,6 +1246,9 @@ async function skillCheck(c) {
   const mod = checkMod(c), nat = rnd(20), tot = nat + mod, ok = nat === 20 || (nat !== 1 && tot >= c.dc);
   G.stats.checks++; if (ok) G.stats.passed++;
   await showDice({ title: `${HEROES[c.hero].name} · ${c.skill} check`, d20: [nat], keep: 0, mod, vs: c.dc, vsLabel: 'DC', verdict: nat === 20 ? 'Critical Success!' : nat === 1 ? 'Critical Failure' : ok ? 'Success' : 'Failure', vcls: ok ? (nat === 20 ? 'crit' : 'hit') : 'miss', sfx: ok ? 'success' : 'fail', hold: 1100 });
+  if (nat === 20) VO.bark('narr.checkcrit', { prio: 2, cd: 0 }); else if (nat === 1) VO.bark('narr.check1', { prio: 2, cd: 0 });
+  else if (Math.random() < 0.5) VO.bark(ok ? 'narr.checkok' : 'narr.checkfail', { prio: 2, cd: 0 }); else VO.bark(c.hero + (ok ? '.checkok' : '.checkfail'), { prio: 2, cd: 0 });
+  await voWait();
   return ok;
 }
 
@@ -1136,7 +1267,7 @@ function setScene(encKey, units) { setMood(encKey === 'fight4' ? 'boss' : 'calm'
 const SCENES = {
   async intro() {
     setScene('fight1', ORDER.map((id, i) => [id, ...ENC.fight1.heroes[i]]));
-    await say('narr', 'The caravan to Thornwick is burning. Minutes ago, the black iron crown you were hired to guard split open with a scream — and four strangers woke in the wreckage, each with a glowing <b>ember-sigil</b> seared into one palm.');
+    await say('narr', 'The caravan to Thornwick is burning. Moments ago, the black iron crown you were paid to guard split open with a scream. You wake in the wreckage, a glowing <b>ember-sigil</b> seared into your palm, three strangers groaning beside you. You feel… employed. Briefly.');
     await say('brannoc', 'On your feet! Whatever that crown did to us can wait. We have company.');
     await say('wren', "Gloomkin raiders. Three of them, and a chief with a <i>very</i> ugly hat. They haven't spotted us behind the wagon yet.");
     await say('skarn', "OI! Crown-thieves! That shiny crown is Skarn's now. Skarn will wear it on Skarn's head, next to Skarn's OTHER hat!");
@@ -1144,14 +1275,15 @@ const SCENES = {
     const r = await dialog('maren', 'Then let it listen while we live. How do we take them?', [
       { t: '"Wren — get us in close. Quietly."', check: { hero: 'wren', skill: 'Stealth', dc: 12 } },
       { t: '"No tricks. CHARGE!"' }]);
-    if (r.i === 0 && r.ok) { G.flags.ambush = true; await say('narr', 'You slip through the smoke unseen. <b>Surprise!</b> Every hero gets advantage on their first attack.'); }
-    else if (r.i === 0) await say('narr', "A burning wheel snaps under Wren's boot. The chief howls. So much for subtle.");
+    await react(...(r.i === 0 ? [['wren', 1], ['brannoc', -1]] : [['brannoc', 1], ['wren', -1]]));
+    if (r.i === 0 && r.ok) { G.flags.ambush = true; await say('narr', 'You slip through the smoke like a rumor. Not one of them sees you coming. <b>Surprise!</b> Every hero gets advantage on their first attack.'); }
+    else if (r.i === 0) await say('narr', "A burning wheel snaps beneath Wren's boot with the volume of a cathedral bell. Every goblin turns. So much for subtle.");
     else await say('brannoc', "That's the spirit!");
     goto('fight1');
   },
   async camp1() {
     setScene('camp', CAMP_UNITS); setBackdrop('camp_scene');
-    await say('narr', 'Night falls. You make camp in a hollow off the road. The fire crackles, and the sigils on your palms pulse in time with it.');
+    await say('narr', 'Night falls. You make camp in a hollow off the road. The fire crackles, and the sigil on your palm pulses in time with it, like a second heartbeat that does not belong to you.');
     await say('isolde', "I studied the crown's shards while you three argued over the chief's hat. It belonged to the <b>Hollow King</b>, a tyrant who refused to die. Our marks are pieces of his crown. He wants them back.");
     await say('wren', 'And by "back" you mean…');
     await say('isolde', 'Out of our hands. Possibly with the hands still attached.');
@@ -1159,72 +1291,84 @@ const SCENES = {
       { t: 'Search the wrecked wagons for supplies.', check: { hero: 'isolde', skill: 'Investigation', dc: 12 } },
       { t: 'Ask Maren to bless the party.' },
       { t: 'Just get some sleep.' }]);
-    if (r.i === 0) { if (r.ok) { G.potions += 2; await say('narr', 'Under a scorched tarp: two Potions of Healing, still corked. <b>(+2 Potions)</b>'); } else await say('narr', 'Only ash, a broken lute, and one very sad boot.'); }
+    await react([[['wren', 1]], [['maren', 1]], [['isolde', 1]]][r.i][0]);
+    if (r.i === 0) { if (r.ok) { G.potions += 2; await say('narr', 'Beneath a scorched tarp you find two Potions of Healing, still corked. Someone up there likes you. <b>(+2 Potions)</b>'); } else await say('narr', 'You find ash, a broken lute, and one very sad boot. You feel the boot\'s loneliness deeply.'); }
     if (r.i === 1) { G.flags.blessNext = true; await say('maren', '"Dawnmother, keep these fools alive. Mostly Brannoc — he needs it most." <b>(Everyone is Blessed, +2 to hit, for the next fight.)</b>'); }
-    longRest(); await say('narr', '<b>Long rest:</b> HP and all abilities restored.');
+    await say('wren', 'So. Cursed crown, undead king, mystery brands. Anyone else regret taking the escort job?');
+    await say('brannoc', 'The pay was good!');
+    await say('wren', 'The pay was a sandwich, Brannoc.');
+    await say('maren', 'It was a good sandwich.');
+    longRest(); await say('narr', '<b>Long rest:</b> You sleep like the dead, which is ironic, given where you are going. HP and all abilities restored.');
     goto('bridge');
   },
   async bridge() {
     setScene('fight2', [['brannoc', 4, 7], ['wren', 6, 7], ['isolde', 5, 8], ['maren', 7, 8]]);
-    await say('narr', 'At dawn you reach the river. A troll the size of a hay cart squats on the only bridge, two shadow-hounds snapping at his heels.');
+    await say('narr', 'At dawn you reach the river. A troll the size of a hay cart squats on the only bridge, two shadow-hounds snapping at his heels. He has the unmistakable look of a creature who has invented a fee.');
     await say('grath', "Bridge toll! Forty gold, or I grind yer bones fer bread. …No wait, that's me cousin. Forty gold or a <i>fight</i>.");
     const r = await dialog('grath', 'Well? Grath is hungry and Grath is bad at waiting.', [
       { t: `Pay the toll. (40 gold — you have ${G.gold})`, dis: G.gold < 40 },
       { t: '"Something worse than us is coming, Grath. Let us pass and we\'ll deal with it."', check: { hero: 'maren', skill: 'Persuasion', dc: 14 } },
       { t: '"Move. Or swim."', check: { hero: 'brannoc', skill: 'Intimidation', dc: 15 } },
       { t: 'Attack!' }]);
-    if (r.i === 0) { G.gold -= 40; G.flags.bridge = 'paid'; await say('grath', 'Pleasure doin\' business! Mind the hounds, they bite tourists.'); return goto('loot2'); }
+    await react(...[[['isolde', 1], ['wren', -1]], [['maren', 1]], [['brannoc', 1]], [['brannoc', 1], ['maren', -1]]][r.i]);
+    if (r.i === 0) { G.gold -= 40; G.flags.bridge = 'paid'; await say('grath', 'Pleasure doin\' business! Mind the hounds, they bite tourists. And locals. And Grath.'); return goto('loot2'); }
     if (r.i === 1 && r.ok) { G.flags.bridge = 'talked'; await say('grath', '…The Hollow King? Grath hates that guy. Here, take this, and go break his stupid crown.'); return goto('loot2'); }
-    if (r.i === 2 && r.ok) { G.flags.bridge = 'scared'; G.gold += 25; await say('narr', 'Grath takes one look at Brannoc, yelps, and dives into the river, abandoning his hoard. <b>(+25 gold)</b>'); return goto('loot2'); }
+    if (r.i === 2 && r.ok) { G.flags.bridge = 'scared'; G.gold += 25; await say('narr', 'Grath takes one look at Brannoc, yelps like a kettle, and dives into the river, abandoning his hoard. You feel taller. <b>(+25 gold)</b>'); return goto('loot2'); }
     if (r.i === 1 || r.i === 2) await say('grath', 'Hah! Nice try, little meat. HOUNDS!');
     else await say('brannoc', 'Steel it is!');
     goto('fight2');
   },
   async chapel() {
     setScene('fight3', [['brannoc', 5, 7], ['wren', 6, 7], ['isolde', 5, 8], ['maren', 6, 8]]);
-    await say('narr', 'The chapel of the Dawnmother sits cracked open on the hill, black candles burning in every window. A young woman is chained to the gate.');
+    await say('narr', 'The chapel of the Dawnmother sits cracked open on the hill, black candles guttering in every window. A young woman is chained to the gate. She looks remarkably well rested for a hostage.');
     await say('ilsa', 'Thank the light! The Ashen cult dragged my brother inside — they raise the dead in there. Please, free me, I can show you the way!');
     const r = await dialog('wren', 'Your call. Something smells off — and not just the corpses.', [
       { t: 'Study her carefully before deciding.', check: { hero: 'maren', skill: 'Insight', dc: 13 } },
       { t: "Free her. We're heroes, aren't we?" },
       { t: 'Leave her chained and go in.' }]);
+    await react(...[[['maren', 1]], [['brannoc', 1], ['wren', -1]], [['wren', 1], ['maren', -1]]][r.i]);
     if (r.i === 0 && r.ok) {
       G.flags.kingWeak = true;
       await say('maren', "Your chains aren't locked, child. And that ember brand under your sleeve is fresh.");
       await say('ilsa', '…Fine! You want to live? The Hollow King fears the dawn. Radiant light cracks his bones. Now let me GO.');
       await say('narr', 'She bolts into the dark. <b>You learned the Hollow King\'s weakness:</b> his AC is lowered and radiant attacks deal double damage to him.');
-    } else if (r.i <= 1) { G.flags.traitor = true; await say('narr', 'The chains fall away far too easily. Ilsa smiles — and sprints inside, shouting a warning. <b>She was one of them!</b>'); }
-    else await say('ilsa', "You'll regret this!");
+    } else if (r.i <= 1) { G.flags.traitor = true; await say('narr', 'The chains fall away far too easily. Ilsa smiles, and sprints inside, shrieking a warning. <b>She was one of them!</b> You feel the specific shame of being outplayed by a stranger in costume jewelry.'); }
+    else await say('ilsa', "You'll regret this! I'm writing a very angry letter!");
     goto('fight3');
   },
   async camp2() {
     setScene('camp', CAMP_UNITS); setBackdrop('camp_scene');
-    await say('narr', 'Beneath the chapel, a stair spirals down into the crypt. You rest one last time by a guttering fire. The sigils burn so hot now that Wren has wrapped her hand in wet cloth.');
+    await say('narr', 'Beneath the chapel, a stair spirals down into the crypt. You rest one last time by a guttering fire. The sigils burn so hot now that Wren has wrapped her hand in wet cloth, and is complaining about it, eloquently.');
     await say('brannoc', 'Whatever is down there, we face it together. Four marks, four blades. Well — two blades, a bow, and a very angry prayer.');
+    await say('maren', "Before we go down there, I want you all to know I've forgiven you. In advance. You'll need it.");
+    await say('isolde', "That's either deeply touching or deeply alarming.");
+    await say('wren', 'Both. Her love language is threats.');
     const r = await dialog('isolde', 'I could try to turn the marks against him — attune them to us instead of to him. It\'s risky.', [
       { t: 'Do it, Isolde.', check: { hero: 'isolde', skill: 'Arcana', dc: 13 } },
       { t: 'Too dangerous. Just rest.' }]);
-    if (r.i === 0 && r.ok) { G.flags.attuned = true; await say('narr', 'The sigils flare white, then cool to silver. <b>For the final fight, every hero is Blessed (+2 to hit).</b>'); }
+    await react(...[[['isolde', 1], ['maren', -1]], [['maren', 1]]][r.i]);
+    if (r.i === 0 && r.ok) { G.flags.attuned = true; await say('narr', 'The sigils flare white, then cool to silver. For the first time, the crown is listening to <i>you</i>. <b>For the final fight, every hero is Blessed (+2 to hit).</b>'); }
     else if (r.i === 0) await say('narr', 'The whispers swell into a roar… then fade. Nothing gained. Nothing lost. Probably.');
-    longRest(); await say('narr', '<b>Long rest:</b> HP and all abilities restored.');
+    longRest(); await say('narr', '<b>Long rest:</b> You sleep like the dead, which is ironic, given where you are going. HP and all abilities restored.');
     goto('boss');
   },
   async boss() {
     setScene('fight4', [['brannoc', 5, 7], ['wren', 6, 7], ['isolde', 5, 8], ['maren', 6, 8]]);
-    await say('narr', 'The crypt of the Hollow King. On a throne of stacked coffins sits a crowned skeleton in rotted violet, the empty circlet on his skull pulsing in time with your palms.');
-    await say('king', 'Children of my crown. You carry what is mine. Kneel, return the shards, and I will let one of you rule beside me — forever.');
+    await say('narr', 'The crypt of the Hollow King. On a throne of stacked coffins sits a crowned skeleton in rotted violet, the circlet on his skull pulsing in time with your palm. He has clearly been waiting a very long time to say something dramatic.');
+    await say('king', 'Children of my crown. You carry what is mine. Kneel, return the shards, and I will let one of you rule beside me — forever. There is no dental plan. There are no teeth.');
     const r = await dialog('king', 'Who among you will kneel?', [
       { t: '"Your crown is broken. So is your hold on us."', check: { hero: 'maren', skill: 'Persuasion', dc: 15 } },
       { t: '"Come and take it, bone-face."', check: { hero: 'brannoc', skill: 'Intimidation', dc: 15 } },
       { t: 'Draw steel. (Fight)' }]);
-    if (r.i < 2 && r.ok) { G.flags.kingShaken = true; await say('narr', 'The King recoils as if struck — a crack splits his skull. <b>(The Hollow King starts the fight wounded: −15 HP.)</b>'); }
-    else if (r.i < 2) await say('king', 'Defiance. How delicious. I will wear your bones as a cloak.');
+    await react(...[[['maren', 1]], [['brannoc', 1], ['wren', 1]], [['brannoc', 1]]][r.i]);
+    if (r.i < 2 && r.ok) { G.flags.kingShaken = true; await say('narr', 'The King recoils as if struck, and a crack splits his skull. Words, it turns out, can hurt. <b>(The Hollow King starts the fight wounded: −15 HP.)</b>'); }
+    else if (r.i < 2) await say('king', 'Defiance! How delicious. I shall wear your bones as a cloak, and your opinions as a hat.');
     goto('fight4');
   },
   async ending() {
     setScene('fight4', [['brannoc', 5, 3], ['wren', 6, 3], ['isolde', 4, 4], ['maren', 7, 4]]); setMood('triumph');
     const F = G.flags, s = G.stats;
-    await say('narr', 'The Hollow King shatters into a storm of ash and violet light. His crown falls, splits, and goes dark forever. On your palms, the ember-sigils cool into thin silver scars.');
+    await say('narr', 'The Hollow King shatters into a storm of ash and violet light. His crown falls, splits, and goes dark forever. On your palm, the ember-sigil cools into a thin silver scar. You feel… free. And a little bit famous.');
     await say('wren', 'So… does anyone else want to never touch a cursed crown again? Just me?');
     await say('isolde', F.attuned ? 'The marks answered to us at the end, not to him. I\'ll be writing about that for the rest of my life.' : 'The marks are quiet. For the first time since the road, I can hear myself think.');
     if (F.bridge === 'talked') await say('narr', 'On the road home, Grath waves you across his bridge for free, forever. He tells everyone he helped. In fairness, he did.');
@@ -1238,6 +1382,7 @@ const SCENES = {
     panel(`<svg class="emb" viewBox="0 0 100 100">${EMBLEM}</svg><h1 class="logo">The End</h1><div class="sub">${legend}</div>
       <div class="lineup">${ORDER.map(id => `<div><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero', id)}"><b>${HEROES[id].name}</b>Level ${G.party[id].lv}</div>`).join('')}</div>
       <ul class="l"><li>Fights won: <b>${s.fights}</b> · Rounds fought: <b>${s.rounds}</b></li><li>Critical hits: <b>${s.crits}</b> · Foes felled: <b>${s.kills}</b></li><li>Skill checks passed: <b>${s.passed}/${s.checks}</b> · Gold: <b>${G.gold}</b></li>
+      <li>Approval: ${ORDER.map(id => `${HEROES[id].name} <b>${sgn((G.appr || {})[id] || 0)}</b>`).join(' · ')}</li>
       <li>Grath: <b>${{ talked: 'befriended', scared: 'scared off', paid: 'paid off' }[F.bridge] || 'fought'}</b> · Ilsa: <b>${F.kingWeak ? 'saw through her' : F.traitor ? 'betrayed you' : 'left in chains'}</b> · The King: <b>${F.kingShaken ? 'shaken by your words' : 'defiant to the end'}</b></li></ul>
       <p class="tag" style="margin-top:10px">Every choice above came from your dice and your decisions. Play again and the story changes.</p>
       <div class="row"><button class="choice" data-a="again">Play again</button><button class="choice" data-a="title">Title screen</button></div>`, true,
@@ -1256,7 +1401,7 @@ function lootScreen(stage) {
   const gold = L.gold[0] + Math.floor(Math.random() * (L.gold[1] - L.gold[0] + 1)); G.gold += gold; G.potions += L.potions;
   let intro = 'The dust settles. You catch your breath (+25% HP) and pick through what the enemy left behind.';
   if (stage === 'loot2' && G.flags.bridge) intro = { paid: 'Grath waves you across, counting coins. Under the bridge you spot something glinting in the weeds.', talked: 'Grath stomps off grumbling, leaving you a gift from his hoard.', scared: 'Grath\'s abandoned hoard is all yours.' }[G.flags.bridge] + ' Clever words are worth as much as steel.';
-  const it = L.item, acts = {};
+  const it = L.item, acts = {}; setTimeout(() => VO.bark(lvl.length ? 'narr.levelup' : 'narr.loot', { prio: 2, cd: 0 }), 300);
   ORDER.forEach(id => acts['give_' + id] = () => { const P = G.party[id]; P.items.push(it); if (it.hp) { P.maxhp += it.hp; P.hp += it.hp; } goto(NEXT[stage]); });
   panel(`<h2>${stage === 'loot2' && G.flags.bridge ? 'The Bridge Is Yours' : 'Victory!'}</h2><p class="txt narr">${intro}</p>
     ${lvl.length ? `<h3>Level up! The party reaches level ${newLv}</h3><ul class="l">${lvl.join('')}</ul>` : ''}
@@ -1272,9 +1417,9 @@ function titleScreen() {
     ${s && s.stage !== 'ending' ? `<button class="choice" data-a="cont">Continue — ${(G = s, stageName())}</button>` : ''}
     <button class="choice" data-a="new">New Game</button>
     <button class="choice" data-a="help">How to Play</button>
-    <button class="choice" data-a="snd">Sound: ${muted ? 'Off' : 'On'}</button>
+    <div class="row"><button class="choice" data-a="snd">Sound: ${muted ? 'Off' : 'On'}</button><button class="choice" data-a="vo">${VO.label()}</button></div>
     <div class="press">Mouse · Touch · Keyboard · PS5 controller</div>`, true,
-    { cont: () => { G = loadSave(); runStage(); }, new: () => { newGameState(); goto('intro'); }, help: () => helpScreen(titleScreen), snd: () => { setMuted(!muted); titleScreen(); } }, 'title');
+    { cont: () => { G = loadSave(); runStage(); }, new: () => { newGameState(); goto('intro'); }, help: () => helpScreen(titleScreen), snd: () => { setMuted(!muted); titleScreen(); }, vo: () => { VO.setOn(!VO.on); titleScreen(); if (VO.on) VO.bark('narr.voon', { prio: 3, cd: 0 }); } }, 'title');
   G = null; updateUI();
 }
 function helpScreen(back) {
@@ -1294,11 +1439,13 @@ function openMenu() {
   panel(`<h2>Menu</h2>
     <button class="choice" data-a="resume">Resume</button>
     <button class="choice" data-a="snd">Sound: ${muted ? 'Off' : 'On'}</button>
+    <button class="choice" data-a="vo">${VO.label()}</button>
+    <button class="choice" data-a="vol" ${VO.on ? '' : 'disabled'}>${VO.volLabel()}</button>
     <button class="choice" data-a="dice">Dice speed: ${DICE < 1 ? 'Fast' : 'Normal'}</button>
     <button class="choice" data-a="help">How to Play</button>
     ${C ? '<button class="choice" data-a="retry">Restart this fight</button>' : ''}
     <button class="choice" data-a="quit">Save &amp; quit to title</button>`, true,
-    { resume: closeMenu, snd: () => { setMuted(!muted); menuOpen = false; openMenu(); }, dice: () => { DICE = DICE < 1 ? 1 : 0.5; localStorage.setItem('emberfall-fastdice', DICE < 1 ? '1' : '0'); menuOpen = false; openMenu(); },
+    { resume: closeMenu, snd: () => { setMuted(!muted); menuOpen = false; openMenu(); }, vo: () => { VO.setOn(!VO.on); menuOpen = false; openMenu(); }, vol: () => { VO.cycleVol(); menuOpen = false; openMenu(); VO.bark('narr.voon', { prio: 3, cd: 0 }); }, dice: () => { DICE = DICE < 1 ? 1 : 0.5; localStorage.setItem('emberfall-fastdice', DICE < 1 ? '1' : '0'); menuOpen = false; openMenu(); },
       help: () => helpScreen(() => { menuOpen = false; openMenu(); }), retry: () => { menuOpen = false; hideOverlay(); C = null; G = loadSave(); runStage(); }, quit: () => { menuOpen = false; C = null; titleScreen(); } });
 }
 let menuRestore = null;
@@ -1377,12 +1524,15 @@ addEventListener('orientationchange', () => setTimeout(resize, 200));
 // ---------------- BOOT ----------------
 DICE = localStorage.getItem('emberfall-fastdice') === '1' ? 0.5 : 1;
 setMuted(muted);
+{ const spk = {}; for (const k in SPK) if (SPK[k]) spk[k] = { name: SPK[k].name, color: SPK[k].team === 'hero' ? '#ffd27a' : SPK[k].team === 'npc' ? '#d7b4ff' : '#ff8a80' }; for (const k in EN) if (!spk[k]) spk[k] = { name: EN[k].name, color: '#ff8a80' };
+  VO.init({ key: 'emberfall', base: 'vo/', lines: VO_LINES, spk, muted: () => muted, theme: { bottom: 'calc(env(safe-area-inset-bottom) + 21%)', place: el => { el.style.top = ''; el.style.bottom = ''; if (!overlayOpen()) return; const t = $('#panel').getBoundingClientRect().top; if (t > 90) el.style.bottom = (innerHeight - t + 10) + 'px'; else { el.style.bottom = 'auto'; el.style.top = '56px'; } } },
+    duck: on => { if (AC && musicGain) musicGain.gain.setTargetAtTime(on ? 0.2 : 0.55, AC.currentTime, 0.12); } }); }
 for (const n of Object.values(MAP_ART)) art('map_' + n); for (const k of TOK_KEYS) art('t_' + k); art('t_ilsa_npc');
 resize(); titleScreen(); requestAnimationFrame(render);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 window.__ember = {
   get G() { return G; }, get C() { return C; }, setSpeed(s, d) { SPEED = s; DICE = d == null ? 1 : d; }, force(a) { forced.push(...a); },
-  autoHero, handleTile, pressAbility, endTurn, goto, runStage, newGame() { newGameState(); goto('intro'); }, set autoplay(v) { window.__autoplay = v; },
+  VO, autoHero, handleTile, pressAbility, endTurn, goto, runStage, newGame() { newGameState(); goto('intro'); }, set autoplay(v) { window.__autoplay = v; },
   state() { return { stage: G && G.stage, combat: !!C, over: C && C.over, overlay: overlayOpen(), dice: diceShowing, cur: C && C.cur && C.cur.name, round: C && C.round, rot: ROT, ts: TS,
     units: C ? C.units.map(u => `${u.name}:${u.hp}/${u.maxhp}@${u.x},${u.y}`) : [] }; },
   panelButtons() { return focusables().map(b => b.textContent); },
