@@ -8,6 +8,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="description" content="Emberfall: The Hollow Crown, a turn-based fantasy tactics adventure. Roll the d20, lead your party, break the crown.">
 <link rel="manifest" href="manifest.json">
+<link rel="preload" as="image" href="art/title_bg.webp" type="image/webp">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Emberfall: The Hollow Crown</title>
@@ -132,6 +133,36 @@ table.k{width:100%;font-size:14px;border-collapse:collapse}table.k td{padding:4p
 .press{text-align:center;font-size:12px;color:#8a7454;margin-top:8px;letter-spacing:1px}
 @media (max-width:700px){#log{font-size:11px;max-width:96%}}
 @media (orientation:landscape) and (max-height:560px){#who{flex-wrap:wrap}#who .nm{min-width:140px}.res{width:100%;justify-content:flex-start}.lineup{display:none}.emb{width:56px}#log{max-width:70%}}
+/* ---- painted look ---- */
+#cv{transition:filter .35s ease}
+#app.dlg #cv{filter:blur(2.5px) brightness(.86) saturate(1.05)}
+#stage::after{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.45) 100%);z-index:1}
+#log,#info,#banner,#toast{z-index:2}
+#scene{position:fixed;inset:-4%;z-index:9;background:#0b0806 center/cover no-repeat;animation:kb 40s ease-in-out infinite alternate;will-change:transform}
+#scene.hidden{display:none}
+#scene::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,.05) 35%,rgba(0,0,0,.7) 100%),linear-gradient(rgba(0,0,0,0) 55%,rgba(0,0,0,.55))}
+#scene.camp_scene{filter:saturate(1.08)}
+@media (orientation:portrait){#scene.title_bg{background-position:18% center}#scene.camp_scene{background-position:46% center}}
+@keyframes kb{from{transform:scale(1) translate(0,0)}to{transform:scale(1.08) translate(-1.5%,-1%)}}
+#overlay{flex-direction:column;align-items:center;justify-content:flex-end;background:linear-gradient(rgba(8,5,3,.1) 25%,rgba(8,5,3,.62))}
+#overlay.center{justify-content:center;align-items:center;background:rgba(8,5,3,.62)}
+#overlay.title{background:radial-gradient(ellipse at center,rgba(8,5,3,0),rgba(8,5,3,.45))}
+#overlay.title #panel{background:linear-gradient(rgba(24,17,10,.62),rgba(14,10,6,.8));backdrop-filter:none;border-color:rgba(201,162,82,.55)}
+#bigp{width:min(760px,100%);display:flex;align-items:flex-end;gap:12px;margin-bottom:-14px;z-index:1;pointer-events:none}
+#bigp.hidden{display:none}
+#bigp img{width:210px;height:210px;object-fit:cover;border-radius:10px 10px 4px 4px;border:2px solid #c9a252;box-shadow:0 10px 30px rgba(0,0,0,.8),0 0 0 4px rgba(0,0,0,.35);background:#120d0a;-webkit-mask-image:linear-gradient(#000 78%,rgba(0,0,0,.25));mask-image:linear-gradient(#000 78%,rgba(0,0,0,.25))}
+#bigp.foe img{border-color:#a33b2c}#bigp.npc img{border-color:#9ea3b0}
+#bigp .nm{padding-bottom:22px;text-shadow:0 2px 6px #000,0 0 14px #000}
+#bigp .nm b{display:block;color:#ffd27a;font-size:26px;font-variant:small-caps;letter-spacing:1.5px}
+#bigp .nm small{color:#d8c6a0;font-size:14px;font-style:italic}
+#bigp.in img{animation:bigin .35s ease-out}
+@keyframes bigin{from{opacity:0;transform:translateY(12px) scale(.97)}to{opacity:1;transform:none}}
+#bigp:not(.hidden) ~ #panel .spk{display:none}
+#bigp:not(.hidden) ~ #panel{padding-top:20px}
+.chip img,#who img,.lineup img,.pc img,.spk img,.choice img{border-radius:50%;filter:drop-shadow(0 2px 3px rgba(0,0,0,.7))}
+.lineup img{width:58px;height:58px}
+@media (max-width:700px){#bigp img{width:132px;height:132px}#bigp .nm b{font-size:20px}#bigp .nm{padding-bottom:18px}}
+@media (orientation:landscape) and (max-height:560px){#bigp img{width:96px;height:96px}#bigp .nm b{font-size:17px}#bigp{margin-bottom:-8px}}
 </style>
 </head>
 <body>
@@ -140,7 +171,8 @@ table.k{width:100%;font-size:14px;border-collapse:collapse}table.k td{padding:4p
   <div id="stage"><canvas id="cv"></canvas><div id="log"></div><div id="info"></div><div id="banner"></div><div id="toast"></div></div>
   <div id="hud"><div id="who"></div><div id="abil"></div></div>
 </div>
-<div id="overlay" class="hidden"><div id="panel"></div></div>
+<div id="scene" class="hidden"></div>
+<div id="overlay" class="hidden"><div id="bigp" class="hidden"><img alt=""><div class="nm"></div></div><div id="panel"></div></div>
 <div id="dice" class="hidden"></div>
 <div id="flash"></div>
 <script>
@@ -218,62 +250,74 @@ const SPK = {
 for (const id of ORDER) SPK[id] = { name: HEROES[id].name, sub: HEROES[id].cls, color: HEROES[id].color, glyph: HEROES[id].glyph, team: 'hero' };
 const ENC = {
   fight1: { name: 'The Burning Road', theme: 'forest', seed: 11, map: [
-    'TT..,,,..TTT',
-    'T...,,,...TT',
-    '..r.,,,..r..',
-    '....,,,.....',
-    '...c,,,c....',
-    '....,,,..r..',
-    '.T..,,,.....',
-    'TT..,,,...TT',
-    'TTT.,,,..TTT'], heroes: [[4, 7], [5, 7], [6, 7], [5, 8]],
+    'TTT......TTT',
+    'TT........TT',
+    'T.......r.TT',
+    'T..cc..cc..T',
+    'T..cc..cc..T',
+    'T.........TT',
+    'T..r......TT',
+    'TT........TT',
+    'TTT......TTT'], heroes: [[4, 7], [5, 7], [6, 7], [5, 8]],
     foes: [['skarn', 5, 1], ['cutter', 3, 2], ['cutter', 7, 2], ['archer', 8, 0]] },
   fight2: { name: "Grath's Bridge", theme: 'river', seed: 23, map: [
-    'T..r....r..T',
+    '....rr......',
+    '.rr.rr.r.r..',
+    '.rr.......r.',
+    '............',
+    'wwwww==wwwww',
+    'wwwww==wwwww',
     '............',
     '..r......r..',
-    'wwwww==wwwww',
-    'wwwww==wwwww',
-    'wwwww==wwwww',
-    '............',
-    '..r......r..',
-    'T..........T'], heroes: [[4, 7], [6, 7], [5, 8], [7, 8]],
-    foes: [['grath', 5, 1], ['hound', 3, 1], ['hound', 8, 1]] },
+    '............'], heroes: [[4, 7], [6, 7], [5, 8], [7, 8]],
+    foes: [['grath', 6, 2], ['hound', 3, 2], ['hound', 8, 2]] },
   fight3: { name: 'The Ashen Chapel', theme: 'chapel', seed: 37, map: [
     '############',
-    '#..p....p..#',
-    '#....aa....#',
-    '#..p....p..#',
+    '#..p.aa.p..#',
     '#..........#',
-    '#.bb....bb.#',
-    '#..........#',
-    '#.bb....bb.#',
-    '####....####'], heroes: [[5, 7], [6, 7], [5, 8], [6, 8]],
-    foes: [['acolyte', 5, 1], ['hollowed', 2, 3], ['hollowed', 9, 3], ['hollowed', 4, 3]] },
+    '#..p...p...#',
+    '#bb......bb#',
+    '#...b..b...#',
+    '#bb......bb#',
+    '#####..#####',
+    '#####..#####'], heroes: [[5, 7], [6, 7], [5, 8], [6, 8]],
+    foes: [['acolyte', 6, 2], ['hollowed', 2, 3], ['hollowed', 9, 3], ['hollowed', 5, 3]] },
   fight4: { name: 'Crypt of the Hollow King', theme: 'crypt', seed: 41, map: [
     '############',
-    '#g........g#',
-    '#..p....p..#',
+    '#.........g#',
+    '#g.........#',
+    '#g.p....p.g#',
+    '#.........g#',
+    '#g.........#',
+    '#..p....p.g#',
     '#..........#',
-    '#g........g#',
-    '#..p....p..#',
-    '#..........#',
-    '#g........g#',
     '#####..#####'], heroes: [[5, 7], [6, 7], [5, 8], [6, 8]],
     foes: [['king', 5, 1], ['hollowed', 4, 2], ['hollowed', 7, 2]] },
   camp: { name: 'Camp', theme: 'forest', seed: 5, map: [
     'TTT......TTT',
     'T..........T',
-    '...r.......T',
     '............',
-    '.....f......',
+    '.........r..',
+    '..r..f......',
     '............',
-    'T.......r...',
+    '............',
     'TT........TT',
     'TTT......TTT'] },
 };
 const CAMP_UNITS = [['brannoc', 4, 3], ['wren', 7, 4], ['isolde', 4, 5], ['maren', 6, 5]];
+// painted art (separate files, cached by the service worker)
+const MAP_ART = { fight1: 'road', fight2: 'bridge', fight3: 'chapel', fight4: 'crypt', camp: 'camp' };
+const TOK_KEYS = new Set(['brannoc', 'wren', 'isolde', 'maren', 'skarn', 'grath', 'ilsa', 'king', 'cutter', 'archer', 'hollowed', 'acolyte', 'hound']);
+const IMGS = {};
+function art(name) {
+  if (IMGS[name]) return IMGS[name];
+  const im = new Image(); im.decoding = 'async'; im.src = 'art/' + name + '.webp'; IMGS[name] = im;
+  im.onload = () => { im.ok = true; if (name.startsWith('map_')) { const E = C ? C.enc : bgEnc; if (E && 'map_' + MAP_ART[E.key] === name) makeBg(); } else if (name.startsWith('t_')) tokCache.clear(); };
+  return im;
+}
+const tokCache = new Map();
 const BLOCK = new Set(['T', 'r', 'c', 'w', '#', 'p', 'a', 'b', 'g', 'f']);
+for (const k in ENC) ENC[k].key = k;
 const THEMES = {
   forest: { floor: ['#3a4a25', '#3f5027', '#35441f'], speck: '#2a3818' },
   river: { floor: ['#3d4d2a', '#42532b', '#384725'], speck: '#2c3a1c' },
@@ -407,6 +451,25 @@ function makeBg() {
   bg = document.createElement('canvas'); bg.width = VC * TS * DPR; bg.height = VR * TS * DPR;
   const g = bg.getContext('2d'); g.scale(DPR, DPR);
   const R = mulberry(E.seed), th = THEMES[E.theme], s = TS;
+  const im = MAP_ART[E.key] ? art('map_' + MAP_ART[E.key]) : null;
+  if (im && im.ok) {
+    // affine-map the painting onto the (possibly rotated) grid
+    const o = vp(-0.5, -0.5), ex = vp(0.5, -0.5), ey = vp(-0.5, 0.5), sx = im.width / COLS, sy = im.height / ROWS;
+    g.save(); g.transform((ex.x - o.x) / sx, (ex.y - o.y) / sx, (ey.x - o.x) / sy, (ey.y - o.y) / sy, o.x, o.y);
+    g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0); g.restore();
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const ch = map[y][x]; if (ch === 'f' || ch === 'c') fireTiles.push({ x, y, cart: ch === 'c', art: true }); }
+    // colour grade: warm highlights, teal shadows, a touch of contrast
+    g.globalCompositeOperation = 'soft-light'; g.fillStyle = 'rgba(255,170,90,.35)'; g.fillRect(0, 0, VC * s, VR * s);
+    g.globalCompositeOperation = 'multiply'; g.fillStyle = 'rgba(200,220,235,.9)'; g.fillRect(0, 0, VC * s, VR * s);
+    g.globalCompositeOperation = 'source-over';
+    // subtle grid
+    g.lineWidth = 1;
+    for (let i = 0; i <= VC; i++) { g.strokeStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.moveTo(i * s + 0.5, 0); g.lineTo(i * s + 0.5, VR * s); g.stroke(); g.strokeStyle = 'rgba(255,235,190,.07)'; g.beginPath(); g.moveTo(i * s + 1.5, 0); g.lineTo(i * s + 1.5, VR * s); g.stroke(); }
+    for (let i = 0; i <= VR; i++) { g.strokeStyle = 'rgba(0,0,0,.28)'; g.beginPath(); g.moveTo(0, i * s + 0.5); g.lineTo(VC * s, i * s + 0.5); g.stroke(); g.strokeStyle = 'rgba(255,235,190,.07)'; g.beginPath(); g.moveTo(0, i * s + 1.5); g.lineTo(VC * s, i * s + 1.5); g.stroke(); }
+    const vg = g.createRadialGradient(VC * s / 2, VR * s / 2, Math.min(VC, VR) * s * 0.35, VC * s / 2, VR * s / 2, Math.max(VC, VR) * s * 0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.55)'); g.fillStyle = vg; g.fillRect(0, 0, VC * s, VR * s);
+    bg.art = true; return;
+  }
   for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
     const ch = map[y][x], c = vp(x, y), x0 = c.x - s / 2, y0 = c.y - s / 2;
     let base = th.floor[Math.floor(R() * 3)];
@@ -451,6 +514,20 @@ function drawDeco(g, ch, cx, cy, s, R) {
 
 // token drawing (also used for portraits)
 function drawToken(g, cx, cy, r, color, glyph, team, o = {}) {
+  const key = o.key && TOK_KEYS.has(o.key) ? 't_' + o.key + (o.key === 'ilsa' && team !== 'foe' ? '_npc' : '') : null, im = key && art(key);
+  if (im && im.ok) {
+    const d = r * 2.35, h = d / 2;
+    // soft contact shadow, like a miniature standing on the table
+    const sg = g.createRadialGradient(cx + h * .12, cy + h * .78, 0, cx + h * .12, cy + h * .78, h * 1.05);
+    sg.addColorStop(0, 'rgba(0,0,0,.6)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = sg;
+    g.save(); g.translate(cx + h * .12, cy + h * .78); g.scale(1, .45); g.beginPath(); g.arc(0, 0, h * 1.05, 0, 7); g.restore(); g.fill();
+    // cached, pre-scaled bitmap (cheap per frame on integrated GPUs)
+    const px = Math.round(d * DPR), ck = key + px; let bmp = tokCache.get(ck);
+    if (!bmp) { bmp = document.createElement('canvas'); bmp.width = bmp.height = px; const bg2 = bmp.getContext('2d'); bg2.imageSmoothingQuality = 'high'; bg2.drawImage(im, 0, 0, px, px); tokCache.set(ck, bmp); }
+    g.drawImage(bmp, cx - h, cy - h * 1.06, d, d);
+    if (o.flash) { g.globalAlpha *= .6; g.fillStyle = '#fff'; g.beginPath(); g.arc(cx, cy - h * .06, h * .9, 0, 7); g.fill(); g.globalAlpha /= .6; }
+    return;
+  }
   if (!o.noShadow) { g.fillStyle = 'rgba(0,0,0,.4)'; g.beginPath(); g.ellipse(cx, cy + r * 0.85, r * 0.9, r * 0.32, 0, 0, 7); g.fill(); }
   const gr = g.createRadialGradient(cx - r * .35, cy - r * .4, r * .1, cx, cy, r);
   gr.addColorStop(0, lighten(color, 50)); gr.addColorStop(0.7, color); gr.addColorStop(1, lighten(color, -40));
@@ -487,12 +564,13 @@ function drawToken(g, cx, cy, r, color, glyph, team, o = {}) {
 }
 function lighten(hex, amt) { const n = parseInt(hex.slice(1), 16); const r = clamp((n >> 16) + amt, 0, 255), gg = clamp(((n >> 8) & 255) + amt, 0, 255), b = clamp((n & 255) + amt, 0, 255); return `rgb(${r},${gg},${b})`; }
 const PCACHE = {};
-function portrait(color, glyph, team) {
+function portrait(color, glyph, team, key) {
+  if (key && TOK_KEYS.has(key)) return 'art/t_' + key + (key === 'ilsa' && team !== 'foe' ? '_npc' : '') + '.webp';
   const k = color + glyph + team; if (PCACHE[k]) return PCACHE[k];
   const c = document.createElement('canvas'); c.width = c.height = 96; drawToken(c.getContext('2d'), 48, 48, 40, color, glyph, team, { noShadow: true });
   return (PCACHE[k] = c.toDataURL());
 }
-const uPortrait = u => portrait(u.color, u.glyph, u.team);
+const uPortrait = u => portrait(u.color, u.glyph, u.team, u.id);
 
 const embers = []; for (let i = 0; i < 26; i++) embers.push({ x: Math.random(), y: Math.random(), v: 0.02 + Math.random() * 0.05, s: Math.random() * 6.28 });
 function upos(u, now) {
@@ -512,7 +590,7 @@ function render(now) {
   // fires
   for (const f of fireTiles) {
     const c = vp(f.x, f.y);
-    for (let i = 0; i < 3; i++) {
+    if (!f.art) for (let i = 0; i < 3; i++) {
       const fl = Math.sin(now / 90 + i * 2 + f.x) * 0.5 + 0.5, h = TS * (0.32 + 0.18 * fl) * (f.cart ? 1 : 0.9);
       ctx.fillStyle = ['rgba(255,90,20,.85)', 'rgba(255,160,40,.8)', 'rgba(255,230,120,.85)'][i];
       const w = TS * (0.22 - i * 0.05);
@@ -522,7 +600,7 @@ function render(now) {
   }
   drawLighting(now);
   if (C) drawCombat(now);
-  else if (bgUnits) for (const [id, x, y] of bgUnits) { const T = HEROES[id], c = vp(x, y); drawToken(ctx, c.x, c.y + Math.sin(now / 600 + x) * 1.5, TS * .34, T.color, T.glyph, 'hero'); }
+  else if (bgUnits) for (const [id, x, y] of bgUnits) { const T = HEROES[id], c = vp(x, y); drawToken(ctx, c.x, c.y + Math.sin(now / 600 + x) * 1.5, TS * .36, T.color, T.glyph, 'hero', { key: id }); }
   drawParts(dt);
   // embers
   ctx.fillStyle = 'rgba(255,150,60,.7)';
@@ -562,11 +640,11 @@ function drawCombat(now) {
     if (v === u && !C.over) { ctx.strokeStyle = 'rgba(255,210,122,' + (0.6 + 0.4 * Math.sin(now / 200)) + ')'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(c.x, c.y + r * .75, r * 1.1, r * .45, 0, 0, 7); ctx.stroke(); }
     ctx.globalAlpha = v.hp <= 0 ? (v.team === 'hero' ? 0.45 : Math.max(0, 1 - (now - v.deathT) / 500)) : (v.hidden ? 0.6 : 1);
     const bob = v.hp > 0 ? Math.sin(now / 500 + v.x * 1.7 + v.y) * s * 0.02 : 0;
-    drawToken(ctx, c.x, c.y + bob, r, v.color, v.glyph, v.team, { flash: v.flash && now - v.flash < 140 });
+    drawToken(ctx, c.x, c.y + bob, r, v.color, v.glyph, v.team, { flash: v.flash && now - v.flash < 140, key: v.id });
     ctx.globalAlpha = 1;
     if (v.hp <= 0 && v.team === 'hero') { ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(c.x - r * .5, c.y - r * .5); ctx.lineTo(c.x + r * .5, c.y + r * .5); ctx.moveTo(c.x + r * .5, c.y - r * .5); ctx.lineTo(c.x - r * .5, c.y + r * .5); ctx.stroke(); }
     if (v.hp > 0) {
-      const bw = s * .74, bx = c.x - bw / 2, by = c.y + r + s * .04;
+      const bw = s * .7, bx = c.x - bw / 2, by = c.y + r * 1.1;
       ctx.fillStyle = 'rgba(0,0,0,.7)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
       const f = v.hp / v.maxhp; ctx.fillStyle = v.team === 'hero' ? (f > .5 ? '#66bb6a' : f > .25 ? '#ffca28' : '#ef5350') : '#e53935'; ctx.fillRect(bx, by, bw * f, 4);
       let tag = ''; if (v.hidden) tag += '◐'; if (v.bless) tag += '✦';
@@ -596,20 +674,25 @@ function drawCombat(now) {
 }
 const EN_BIG = v => !!(v.T && v.T.big);
 // ---- lighting: a low-res darkness layer with soft light holes (cheap on old integrated GPUs)
+const ART_LIGHTS = {
+  fight3: [[5.5, 0.9, 2.6, '255,190,100', .16], [1.2, 1.4, 1.5, '255,170,80', .14], [9.9, 1.4, 1.5, '255,170,80', .14], [1, 6.6, 1.5, '255,170,80', .14], [10.4, 6.6, 1.5, '255,170,80', .14], [5.5, 3.5, 2.2, '190,210,255', .06]],
+  fight4: [[5.5, 2.4, 3, '150,90,255', .22], [0.9, 7, 1.8, '90,170,255', .2], [10.6, 7, 1.8, '90,170,255', .2], [1.3, 3, 1.4, '110,255,140', .1], [10.3, 5.5, 1.3, '110,255,140', .08]],
+};
 const lightCv = document.createElement('canvas'), lctx = lightCv.getContext('2d');
-const DARK = { forest: 0.34, river: 0.24, chapel: 0.5, crypt: 0.64 };
+const DARK = { forest: 0.34, river: 0.24, chapel: 0.5, crypt: 0.64 }, DARK_ART = { forest: 0.2, river: 0.1, chapel: 0.3, crypt: 0.36 };
 function drawLighting(now) {
   const E = C ? C.enc : bgEnc; if (!E) return;
   const W = VC * TS, H = VR * TS, sc = 0.25, lw = Math.ceil(W * sc), lh = Math.ceil(H * sc);
   if (lightCv.width !== lw || lightCv.height !== lh) { lightCv.width = lw; lightCv.height = lh; }
   lctx.globalCompositeOperation = 'source-over'; lctx.clearRect(0, 0, lw, lh);
-  lctx.fillStyle = `rgba(6,3,12,${DARK[E.theme] || 0.3})`; lctx.fillRect(0, 0, lw, lh);
+  lctx.fillStyle = `rgba(6,3,12,${bg && bg.art ? DARK_ART[E.theme] : DARK[E.theme] || 0.3})`; lctx.fillRect(0, 0, lw, lh);
   lctx.globalCompositeOperation = 'destination-out';
   const hole = (gx, gy, r, a) => { const c = vp(gx, gy), x = c.x * sc, y = c.y * sc, rr = r * TS * sc; const g = lctx.createRadialGradient(x, y, 0, x, y, rr); g.addColorStop(0, `rgba(0,0,0,${a})`); g.addColorStop(1, 'rgba(0,0,0,0)'); lctx.fillStyle = g; lctx.fillRect(x - rr, y - rr, rr * 2, rr * 2); };
   const glows = [];
   for (const f of fireTiles) { const fl = 2.8 + Math.sin(now / 130 + f.x) * 0.15 + Math.sin(now / 47 + f.y) * 0.08; hole(f.x, f.y, fl, 1); glows.push([f.x, f.y, fl * 0.8, '255,120,40', 0.2]); }
   const map = C ? C.map : null;
-  if (E.theme === 'chapel' || E.theme === 'crypt') { const mm = map || E.map; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const ch = mm[y][x]; if (ch === 'a') { hole(x, y, 2.4, .9); glows.push([x, y, 1.8, '255,190,90', .14]); } if (ch === 'p' && E.theme === 'crypt') { hole(x, y, 1.4, .5); glows.push([x, y, 1.1, '150,110,255', .1]); } } }
+  if (E.theme === 'chapel' || E.theme === 'crypt') { const mm = map || E.map; for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const ch = mm[y][x]; if (ch === 'a') { hole(x, y, 2.4, .9); glows.push([x, y, 1.8, '255,190,90', .14]); } if (ch === 'p' && E.theme === 'crypt' && !(bg && bg.art)) { hole(x, y, 1.4, .5); glows.push([x, y, 1.1, '150,110,255', .1]); } } }
+  if (bg && bg.art) for (const [x, y, r, col, a] of (ART_LIGHTS[E.key] || [])) { const fl = r * (1 + Math.sin(now / 170 + x * 3) * 0.04); hole(x, y, fl, .85); glows.push([x, y, fl * .75, col, a]); }
   if (C) for (const u of C.units) { if (u.hp <= 0) continue; const p = upos(u, now); hole(p.x, p.y, u === C.cur ? 2.4 : u.team === 'hero' ? 1.8 : 1.2, u === C.cur ? 0.9 : 0.6); if (u.id === 'king') glows.push([p.x, p.y, 2.4, '140,80,255', 0.22]); }
   else if (bgUnits) for (const [, x, y] of bgUnits) hole(x, y, 1.7, 0.6);
   if (C) for (const f of C.fx) if (f.type === 'boom' || f.type === 'bolt') { const p = f.type === 'boom' ? f : f.b; hole(p.x, p.y, 3, 0.9); }
@@ -938,7 +1021,7 @@ function updateOrder() {
 }
 function stageName() { return { intro: 'The Burning Road', fight1: 'The Burning Road', loot1: 'Spoils', camp1: 'Camp', bridge: "Grath's Bridge", fight2: "Grath's Bridge", loot2: 'Spoils', chapel: 'The Ashen Chapel', fight3: 'The Ashen Chapel', loot3: 'Spoils', camp2: 'Last Camp', boss: 'The Crypt', fight4: 'The Crypt', ending: 'Epilogue' }[G.stage] || ''; }
 function partyHtml() {
-  return '<div class="party">' + ORDER.map(id => { const T = HEROES[id], P = G.party[id]; return `<div class="pc"><img src="${portrait(T.color, T.glyph, 'hero')}"><div><b>${T.name}</b> <small>Lv ${P.lv}</small><div class="hpb"><b style="width:${Math.round(100 * P.hp / P.maxhp)}%"></b><span>${P.hp}/${P.maxhp}</span></div></div></div>`; }).join('') + '</div>';
+  return '<div class="party">' + ORDER.map(id => { const T = HEROES[id], P = G.party[id]; return `<div class="pc"><img src="${portrait(T.color, T.glyph, 'hero', id)}"><div><b>${T.name}</b> <small>Lv ${P.lv}</small><div class="hpb"><b style="width:${Math.round(100 * P.hp / P.maxhp)}%"></b><span>${P.hp}/${P.maxhp}</span></div></div></div>`; }).join('') + '</div>';
 }
 function updateHud() {
   const who = $('#who'), ab = $('#abil');
@@ -978,10 +1061,24 @@ $('#order').addEventListener('click', e => { const c = e.target.closest('.chip')
 let panelActions = {}, menuOpen = false, focusI = 0;
 function panel(html, center, actions, cls) {
   if (typing) { clearInterval(typing.iv); typing = null; }
-  const o = $('#overlay'); $('#panel').innerHTML = html; o.className = (center ? 'center ' : '') + (cls || '');
+  const o = $('#overlay'); $('#panel').innerHTML = html; o.className = (center ? 'center ' : '') + (cls || ''); showBig(null); $('#app').classList.add('dlg');
   panelActions = actions || {}; $('#panel').scrollTop = 0; setFocus(0);
 }
-function hideOverlay() { $('#overlay').classList.add('hidden'); menuOpen = false; }
+function hideOverlay() { $('#overlay').classList.add('hidden'); menuOpen = false; showBig(null); $('#app').classList.remove('dlg'); }
+function showBig(spk) {
+  const b = $('#bigp'), S = spk && SPK[spk];
+  if (!S || !TOK_KEYS.has(spk)) { b.className = 'hidden'; return; }
+  const src = 'art/p_' + spk + '.webp', im = b.querySelector('img');
+  if (b.dataset.k !== spk) { b.dataset.k = spk; im.src = src; b.querySelector('.nm').innerHTML = `<b>${S.name}</b><small>${S.sub}</small>`; b.className = 'swap ' + S.team; void b.offsetWidth; }
+  b.className = 'in ' + S.team;
+}
+// full-screen painted backdrops for the title and camp scenes
+function setBackdrop(name) {
+  const el = $('#scene');
+  if (!name) { el.className = 'hidden'; return; }
+  const small = Math.max(innerWidth, innerHeight) * Math.min(2, devicePixelRatio || 1) < 1000;
+  el.style.backgroundImage = `url(art/${name}${small ? '_s' : ''}.webp)`; el.className = 'show ' + name;
+}
 const overlayOpen = () => !$('#overlay').classList.contains('hidden');
 // typewriter: reveals text (keeping inline tags intact); any click/confirm finishes it
 let typing = null;
@@ -1002,7 +1099,7 @@ function clickFocused() { if (finishTyping()) return; const f = focusables(); if
 
 function speakerHead(spk) {
   const S = SPK[spk]; if (!S) return '';
-  return `<div class="spk"><img src="${portrait(S.color, S.glyph, S.team)}"><div><b>${S.name}</b><small>${S.sub}</small></div></div>`;
+  return `<div class="spk"><img src="${portrait(S.color, S.glyph, S.team, spk)}"><div><b>${S.name}</b><small>${S.sub}</small></div></div>`;
 }
 function dialog(spk, text, choices) {
   return new Promise(res => {
@@ -1012,7 +1109,7 @@ function dialog(spk, text, choices) {
       const ck = c.check ? `<span class="chk">[${c.check.skill} DC ${c.check.dc} · ${HEROES[c.check.hero].name} ${sgn(checkMod(c.check))}]</span> ` : '';
       return `<button class="choice" data-a="c${i}" ${c.dis ? 'disabled' : ''}>${choices.length > 1 ? `<span class="n">${i + 1}.</span>` : ''}${ck}${c.t}</button>`;
     }).join('') + '</div>';
-    panel(html, false, acts); typeText($('#panel .txt'), text);
+    panel(html, false, acts); showBig(spk); typeText($('#panel .txt'), text);
   });
 }
 const say = (spk, text, btn = 'Continue ▸') => dialog(spk, text, [{ t: btn }]);
@@ -1027,8 +1124,9 @@ async function skillCheck(c) {
 // ---------------- STAGES ----------------
 const NEXT = { intro: 'fight1', loot1: 'camp1', camp1: 'bridge', loot2: 'chapel', chapel: 'fight3', loot3: 'camp2', camp2: 'boss', boss: 'fight4' };
 function goto(stage) { G.stage = stage; save(); runStage(); }
+const _runStage = () => setBackdrop(null);
 function runStage() {
-  const s = G.stage; $('#log').innerHTML = '';
+  const s = G.stage; $('#log').innerHTML = ''; setBackdrop(null);
   if (s.startsWith('fight')) return startCombat(s);
   C = null; updateUI();
   if (s.startsWith('loot')) return lootScreen(s);
@@ -1052,7 +1150,7 @@ const SCENES = {
     goto('fight1');
   },
   async camp1() {
-    setScene('camp', CAMP_UNITS);
+    setScene('camp', CAMP_UNITS); setBackdrop('camp_scene');
     await say('narr', 'Night falls. You make camp in a hollow off the road. The fire crackles, and the sigils on your palms pulse in time with it.');
     await say('isolde', "I studied the crown's shards while you three argued over the chief's hat. It belonged to the <b>Hollow King</b>, a tyrant who refused to die. Our marks are pieces of his crown. He wants them back.");
     await say('wren', 'And by "back" you mean…');
@@ -1100,7 +1198,7 @@ const SCENES = {
     goto('fight3');
   },
   async camp2() {
-    setScene('camp', CAMP_UNITS);
+    setScene('camp', CAMP_UNITS); setBackdrop('camp_scene');
     await say('narr', 'Beneath the chapel, a stair spirals down into the crypt. You rest one last time by a guttering fire. The sigils burn so hot now that Wren has wrapped her hand in wet cloth.');
     await say('brannoc', 'Whatever is down there, we face it together. Four marks, four blades. Well — two blades, a bow, and a very angry prayer.');
     const r = await dialog('isolde', 'I could try to turn the marks against him — attune them to us instead of to him. It\'s risky.', [
@@ -1138,7 +1236,7 @@ const SCENES = {
     await say('brannoc', 'Drinks are on me. Well — on the Hollow King\'s treasury. Same thing now.');
     const legend = s.passed >= 4 && s.crits >= 2 ? 'Legends of the Ashen Vale' : s.passed >= 3 ? 'Heroes of Thornwick' : 'Survivors of the Hollow Crown';
     panel(`<svg class="emb" viewBox="0 0 100 100">${EMBLEM}</svg><h1 class="logo">The End</h1><div class="sub">${legend}</div>
-      <div class="lineup">${ORDER.map(id => `<div><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero')}"><b>${HEROES[id].name}</b>Level ${G.party[id].lv}</div>`).join('')}</div>
+      <div class="lineup">${ORDER.map(id => `<div><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero', id)}"><b>${HEROES[id].name}</b>Level ${G.party[id].lv}</div>`).join('')}</div>
       <ul class="l"><li>Fights won: <b>${s.fights}</b> · Rounds fought: <b>${s.rounds}</b></li><li>Critical hits: <b>${s.crits}</b> · Foes felled: <b>${s.kills}</b></li><li>Skill checks passed: <b>${s.passed}/${s.checks}</b> · Gold: <b>${G.gold}</b></li>
       <li>Grath: <b>${{ talked: 'befriended', scared: 'scared off', paid: 'paid off' }[F.bridge] || 'fought'}</b> · Ilsa: <b>${F.kingWeak ? 'saw through her' : F.traitor ? 'betrayed you' : 'left in chains'}</b> · The King: <b>${F.kingShaken ? 'shaken by your words' : 'defiant to the end'}</b></li></ul>
       <p class="tag" style="margin-top:10px">Every choice above came from your dice and your decisions. Play again and the story changes.</p>
@@ -1164,12 +1262,12 @@ function lootScreen(stage) {
     ${lvl.length ? `<h3>Level up! The party reaches level ${newLv}</h3><ul class="l">${lvl.join('')}</ul>` : ''}
     <h3>Spoils</h3><ul class="l"><li><b>${gold} gold</b> (total ${G.gold})</li><li><b>${L.potions} Potion${L.potions > 1 ? 's' : ''} of Healing</b> (you have ${G.potions})</li><li><b>${it.name}</b>: ${it.desc}</li></ul>
     <h3>Give the ${it.name} to…</h3>
-    <div class="row">${ORDER.map(id => `<button class="choice" data-a="give_${id}"><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero')}">${HEROES[id].name}</button>`).join('')}</div>`, true, acts);
+    <div class="row">${ORDER.map(id => `<button class="choice" data-a="give_${id}"><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero', id)}">${HEROES[id].name}</button>`).join('')}</div>`, true, acts);
 }
 function titleScreen() {
-  C = null; G = G || null; setScene('camp', CAMP_UNITS); const s = loadSave();
+  C = null; G = G || null; setScene('camp', CAMP_UNITS); setBackdrop('title_bg'); const s = loadSave();
   panel(`<svg class="emb" viewBox="0 0 100 100">${EMBLEM}</svg><h1 class="logo">Emberfall</h1><div class="sub">The Hollow Crown</div>
-    <div class="lineup">${ORDER.map(id => `<div><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero')}"><b>${HEROES[id].name}</b>${HEROES[id].cls}</div>`).join('')}</div>
+    <div class="lineup">${ORDER.map(id => `<div><img src="${portrait(HEROES[id].color, HEROES[id].glyph, 'hero', id)}"><b>${HEROES[id].name}</b>${HEROES[id].cls}</div>`).join('')}</div>
     <p class="tag">Four strangers. One cursed crown. Every roll of the d20 matters.</p>
     ${s && s.stage !== 'ending' ? `<button class="choice" data-a="cont">Continue — ${(G = s, stageName())}</button>` : ''}
     <button class="choice" data-a="new">New Game</button>
@@ -1279,6 +1377,7 @@ addEventListener('orientationchange', () => setTimeout(resize, 200));
 // ---------------- BOOT ----------------
 DICE = localStorage.getItem('emberfall-fastdice') === '1' ? 0.5 : 1;
 setMuted(muted);
+for (const n of Object.values(MAP_ART)) art('map_' + n); for (const k of TOK_KEYS) art('t_' + k); art('t_ilsa_npc');
 resize(); titleScreen(); requestAnimationFrame(render);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 window.__ember = {
